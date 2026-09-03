@@ -1,0 +1,21 @@
+# Normalize line endings: LF in the repo, checked out native on Windows
+* text=auto eol=lf
+
+# Scripts that must keep their platform endings
+*.bat        text eol=crlf
+*.ps1        text eol=crlf
+*.sh         text eol=lf
+
+# Binary assets — never touch
+*.png        binary
+*.jpg        binary
+*.jpeg       binary
+*.gif        binary
+*.ico        binary
+*.mp4        binary
+*.mov        binary
+*.otf        binary
+*.ttf        binary
+*.jar        binary
+*.keystore   binary
+*.jks        binary
