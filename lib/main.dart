@@ -46,7 +46,7 @@ Future<void> main() async {
         ? AppleProvider.debug
         : AppleProvider.appAttest,
     // ignore: deprecated_member_use
-    webProvider: ReCaptchaV3Provider('6LdbsPwqAAAAAB5jY6gkbAhoujuMmCixsf7ktWyr'),
+    webProvider: ReCaptchaV3Provider('6LeK5KctAAAAAGfNUU8smjXwuFa8821IAiZCwEaa'),
   );
 
 
