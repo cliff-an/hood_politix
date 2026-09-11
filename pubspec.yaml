@@ -22,6 +22,7 @@ dependencies:
   firebase_app_check: ^0.4.1
   video_player: ^2.9.2
   collection: ^1.19.1
+  share_plus: ^13.3.0
 
 dev_dependencies:
   flutter_test:

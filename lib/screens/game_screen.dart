@@ -1,7 +1,10 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
 
+import '../models/avatar_catalog.dart';
 import '../models/firebase_service.dart';
 import '../models/game_controller.dart';
 import '../widgets/gameboard_widget.dart';
@@ -95,6 +98,16 @@ class _GameScreenState extends State<GameScreen> {
     final shuffled = [...players]..shuffle();
     final startPlayer = shuffled.first;
     await FirebaseService.instance.startGame(widget.gameId, startPlayer.id);
+  }
+
+  /// Teilt den Beitritts-Code dieses Spiels über die native Share-Sheet.
+  Future<void> _shareJoinCode(String gameId) async {
+    final snap = await FirebaseDatabase.instance.ref('games/$gameId/meta/joinCode').get();
+    final code = snap.exists ? snap.value.toString() : null;
+    if (code == null) return;
+    await SharePlus.instance.share(
+      ShareParams(text: 'Spiel mir bei Hood Politix! Code: $code'),
+    );
   }
 
   @override
@@ -198,7 +211,27 @@ class _GameScreenState extends State<GameScreen> {
                             children:
                                 names.map((n) => Chip(label: Text(n))).toList(),
                           ),
-                          const SizedBox(height: 20),
+                          const SizedBox(height: 16),
+                          Wrap(
+                            spacing: 8,
+                            alignment: WrapAlignment.center,
+                            children: [
+                              OutlinedButton.icon(
+                                icon: const Icon(Icons.person_add),
+                                label: const Text('Freund einladen'),
+                                onPressed: () => showDialog(
+                                  context: context,
+                                  builder: (_) => _InviteFriendDialog(gameId: widget.gameId),
+                                ),
+                              ),
+                              OutlinedButton.icon(
+                                icon: const Icon(Icons.share),
+                                label: const Text('Code teilen'),
+                                onPressed: () => _shareJoinCode(widget.gameId),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
                           ElevatedButton(
                             onPressed: canStart ? _tryStartGame : null,
                             child: Text('Spiel starten (${names.length})'),
@@ -216,6 +249,71 @@ class _GameScreenState extends State<GameScreen> {
           if (showStartVideo) const StartVideoOverlay(),
         ],
       ),
+    );
+  }
+}
+
+/// Zeigt die Freundesliste, um einen Freund direkt in dieses Spiel einzuladen.
+class _InviteFriendDialog extends StatelessWidget {
+  final String gameId;
+  const _InviteFriendDialog({required this.gameId});
+
+  @override
+  Widget build(BuildContext context) {
+    final myUid = FirebaseAuth.instance.currentUser!.uid;
+    final svc = FirebaseService.instance;
+
+    return AlertDialog(
+      title: const Text('Freund einladen'),
+      content: SizedBox(
+        width: 320,
+        child: StreamBuilder<List<String>>(
+          stream: svc.getFriendsStream(myUid),
+          builder: (context, snap) {
+            final friends = snap.data ?? [];
+            if (friends.isEmpty) {
+              return const Text('Noch keine Freunde zum Einladen.');
+            }
+            return SizedBox(
+              height: 300,
+              child: ListView(
+                shrinkWrap: true,
+                children: friends.map((friendUid) {
+                  return FutureBuilder<Map<String, dynamic>?>(
+                    future: svc.getUserProfile(friendUid),
+                    builder: (context, profileSnap) {
+                      final name = profileSnap.data?['username']?.toString() ?? '…';
+                      final avatarPath =
+                          resolveAvatarPath(profileSnap.data?['avatarId']?.toString());
+                      return ListTile(
+                        leading: CircleAvatar(backgroundImage: AssetImage(avatarPath)),
+                        title: Text(name),
+                        trailing: ElevatedButton(
+                          onPressed: () async {
+                            await svc.inviteFriendToGame(gameId, myUid, friendUid);
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('$name eingeladen.')),
+                              );
+                            }
+                          },
+                          child: const Text('Einladen'),
+                        ),
+                      );
+                    },
+                  );
+                }).toList(),
+              ),
+            );
+          },
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Schließen'),
+        ),
+      ],
     );
   }
 }

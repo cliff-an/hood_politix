@@ -262,6 +262,7 @@ Future<List<String>> _loadValidPlayerOrder(String gameId) async {
       await gameRef.child('access/password').set(password);
     }
 
+    await assignJoinCode(gameId);
     await _database.ref('users/$userId/currentGameId').set(gameId);
 
     return gameId;
@@ -682,6 +683,72 @@ Future<List<String>> _loadValidPlayerOrder(String gameId) async {
       final map = Map<String, dynamic>.from(event.snapshot.value as Map);
       return map.keys.map((e) => e.toString()).toList();
     });
+  }
+
+  // ---------- Einladen & Teilen ----------
+
+  /// Lädt einen Freund in ein eigenes (wartendes) Spiel ein. Ist das Spiel
+  /// privat, wird das Passwort in die Einladung übernommen — der Einladende
+  /// kennt es ja bereits, der Eingeladene muss es nicht erneut eintippen.
+  Future<void> inviteFriendToGame(String gameId, String fromUid, String toUid) async {
+    final metaSnap = await _database.ref('games/$gameId/meta').get();
+    final meta = metaSnap.exists ? Map<String, dynamic>.from(metaSnap.value as Map) : {};
+    final gameName = meta['name']?.toString() ?? 'Spiel';
+
+    String? password;
+    if (meta['isPrivate'] == true) {
+      final pwSnap = await _database.ref('games/$gameId/access/password').get();
+      if (pwSnap.exists) password = pwSnap.value.toString();
+    }
+
+    await _database.ref('users/$toUid/invites/$gameId').set({
+      'fromUid': fromUid,
+      'gameName': gameName,
+      if (password != null) 'password': password,
+      'timestamp': ServerValue.timestamp,
+    });
+  }
+
+  Future<void> declineInvite(String uid, String gameId) async {
+    await _database.ref('users/$uid/invites/$gameId').remove();
+  }
+
+  /// Live-Stream offener Einladungen `{gameId: {fromUid, gameName, timestamp}}`.
+  Stream<Map<String, dynamic>> getInvitesStream(String uid) {
+    return _database.ref('users/$uid/invites').onValue.map((event) {
+      if (!event.snapshot.exists || event.snapshot.value == null) return <String, dynamic>{};
+      return Map<String, dynamic>.from(event.snapshot.value as Map);
+    });
+  }
+
+  static const _joinCodeChars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // ohne 0/O, 1/I
+
+  String _generateJoinCode() {
+    final rnd = Random();
+    return List.generate(6, (_) => _joinCodeChars[rnd.nextInt(_joinCodeChars.length)]).join();
+  }
+
+  /// Erzeugt einen eindeutigen Beitritts-Code für ein Spiel und legt den
+  /// Reverse-Index an (gleiches Muster wie usernames/$username → uid).
+  Future<String> assignJoinCode(String gameId) async {
+    String code;
+    DatabaseEvent existing;
+    do {
+      code = _generateJoinCode();
+      existing = await _database.ref('joinCodes/$code').once();
+    } while (existing.snapshot.exists);
+
+    await _database.ref().update({
+      'joinCodes/$code': gameId,
+      'games/$gameId/meta/joinCode': code,
+    });
+    return code;
+  }
+
+  /// Löst einen Beitritts-Code zu einer gameId auf, oder null.
+  Future<String?> resolveJoinCode(String code) async {
+    final snap = await _database.ref('joinCodes/${code.toUpperCase()}').get();
+    return snap.exists ? snap.value.toString() : null;
   }
 
   // ---------- Deck / Rundenfluss ----------
