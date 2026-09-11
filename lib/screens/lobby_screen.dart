@@ -6,6 +6,7 @@ import '../models/firebase_service.dart';
 import '../models/game_meta.dart';
 import '../models/game_controller.dart';
 import 'game_screen.dart';
+import 'profile_screen.dart';
 
 class LobbyScreen extends StatelessWidget {
   final String userId;
@@ -53,6 +54,13 @@ class LobbyScreen extends StatelessWidget {
         backgroundColor: Colors.transparent,
         elevation: 0,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.person),
+            tooltip: 'Mein Profil',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => ProfileScreen(uid: userId)),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: () => FirebaseAuth.instance.signOut(),

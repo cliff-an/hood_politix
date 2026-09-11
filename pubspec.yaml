@@ -32,5 +32,6 @@ flutter:
 
   assets:
     - lib/images/
+    - lib/images/avatars/
     - lib/vids/What_is_Hood_Politix.mp4
     - lib/vids/

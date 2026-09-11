@@ -1,6 +1,10 @@
+import 'dart:math';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
+
+import '../models/avatar_catalog.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -97,9 +101,11 @@ class _LoginScreenState extends State<LoginScreen> {
       final uid   = user.uid;
 
       // ▶️ 3) RTDB: Profil und Username-Index anlegen
+      final defaultAvatar = avatarCatalog[Random().nextInt(avatarCatalog.length)];
       await db.child('users/$uid').set({
         'username': username,
         'createdAt': ServerValue.timestamp,
+        'avatarId': defaultAvatar.id,
       });
       await db.child('usernames/$username').set(uid);
 

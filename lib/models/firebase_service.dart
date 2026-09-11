@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:hp_card_game/models/game_meta.dart';
 import 'package:collection/collection.dart';
 
+import '/models/avatar_catalog.dart';
 import '/models/game_controller.dart';
 import '/models/number_card.dart';
 import '/models/player.dart';
@@ -220,6 +221,7 @@ Future<List<String>> _loadValidPlayerOrder(String gameId) async {
   Future<String> createNewGame(String gameName, String userId) async {
   try {
     final userName = await _fetchUserName(userId);
+    final avatarUrl = resolveAvatarPath(await _fetchAvatarId(userId));
     final gameRef = _database.ref('games').push();
     final gameId = gameRef.key!;
 
@@ -236,7 +238,7 @@ Future<List<String>> _loadValidPlayerOrder(String gameId) async {
         'name': gameName, // 🔹 Spielname speichern
       },
       'players': {
-        userId: {'name': userName, 'handCardIds': []},
+        userId: {'name': userName, 'handCardIds': [], 'avatarUrl': avatarUrl},
       },
       'gameState': {
         'currentPlayerId': userId,
@@ -250,6 +252,8 @@ Future<List<String>> _loadValidPlayerOrder(String gameId) async {
       'gameInfo': {'createdAt': ServerValue.timestamp},
       'cards': cardsData,
     });
+
+    await _database.ref('users/$userId/currentGameId').set(gameId);
 
     return gameId;
   } catch (e) {
@@ -335,8 +339,9 @@ Future<List<String>> _loadValidPlayerOrder(String gameId) async {
   }
 
   Future<void> joinGame(String gameId, String userId, String userName) async {
+    final avatarUrl = resolveAvatarPath(await _fetchAvatarId(userId));
     final playersRef = _database.ref('games/$gameId/players/$userId');
-    await playersRef.set({'name': userName, 'handCardIds': []});
+    await playersRef.set({'name': userName, 'handCardIds': [], 'avatarUrl': avatarUrl});
 
     // Spieler in die Reihenfolge aufnehmen (falls nicht vorhanden)
     final orderRef = _database.ref('games/$gameId/gameState/playerOrder');
@@ -348,6 +353,8 @@ Future<List<String>> _loadValidPlayerOrder(String gameId) async {
       order.add(userId);
       await orderRef.set(order);
     }
+
+    await _database.ref('users/$userId/currentGameId').set(gameId);
   }
 
   Future<String> getCurrentUserName(String userId) async {
@@ -480,6 +487,11 @@ Future<List<String>> _loadValidPlayerOrder(String gameId) async {
       });
     }
     await gameRef.child('placements').set(placements);
+
+    // Profil-Status: niemand ist mehr "im Spiel", sobald es beendet ist.
+    await Future.wait(players.map(
+      (p) => _database.ref('users/${p.id}/currentGameId').remove(),
+    ));
   }
 
   Future<void> notifyPlayersGameEnded(String gameId) async {
@@ -558,6 +570,33 @@ Future<List<String>> _loadValidPlayerOrder(String gameId) async {
       print("Login Fehler: $e");
       return null;
     }
+  }
+
+  // ---------- User Profile / Avatar ----------
+
+  Future<String?> _fetchAvatarId(String userId) async {
+    final snap = await _database.ref('users/$userId/avatarId').get();
+    return snap.exists ? snap.value?.toString() : null;
+  }
+
+  Future<void> setAvatar(String userId, String avatarId) async {
+    await _database.ref('users/$userId/avatarId').set(avatarId);
+  }
+
+  /// Einmaliges Auslesen des Profils (Username, Avatar, aktuelles Spiel).
+  Future<Map<String, dynamic>?> getUserProfile(String userId) async {
+    final snap = await _database.ref('users/$userId').get();
+    if (!snap.exists || snap.value == null) return null;
+    return Map<String, dynamic>.from(snap.value as Map);
+  }
+
+  /// Live-Stream des Profils, z. B. für den Profil-Screen oder die
+  /// Freundesliste (damit der "im Spiel"-Status in Echtzeit aktualisiert).
+  Stream<Map<String, dynamic>?> getUserProfileStream(String userId) {
+    return _database.ref('users/$userId').onValue.map((event) {
+      if (!event.snapshot.exists || event.snapshot.value == null) return null;
+      return Map<String, dynamic>.from(event.snapshot.value as Map);
+    });
   }
 
   // ---------- Deck / Rundenfluss ----------
@@ -695,6 +734,7 @@ Stream<List<GameMeta>> getGamesMetaStream() {
     await Future.wait([
       playersRef.child(playerId).remove(),
       stateRef.child('playerOrder').set(order),
+      _database.ref('users/$playerId/currentGameId').remove(),
     ]);
 
     // If leaving player was at turn, advance to next
@@ -752,6 +792,11 @@ Stream<List<GameMeta>> getGamesMetaStream() {
     batch['gameState/playerOrder']     = remainingIds;
 
     await gameRef.update(batch);
+
+    // Profil-Status: niemand ist mehr "im Spiel", sobald es beendet ist.
+    await Future.wait([leavingPlayerId, ...remainingIds].map(
+      (pid) => _database.ref('users/$pid/currentGameId').remove(),
+    ));
   }
 
   /// Entfernt den eigenen Spieler aus dem /players-Knoten eines beendeten Spiels.
