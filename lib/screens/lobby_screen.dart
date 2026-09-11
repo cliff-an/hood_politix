@@ -25,12 +25,12 @@ class LobbyScreen extends StatelessWidget {
   }
 
   /// Spieler tritt einem bestehenden Spiel bei und navigiert weiter
-  Future<void> _joinAndNavigate(BuildContext context, String gameId) async {
+  Future<void> _joinAndNavigate(BuildContext context, String gameId, {String? password}) async {
     final svc = context.read<FirebaseService>();
     await _disposeControllerIfExists();
     final userName = await svc.getCurrentUserName(userId);
 
-    await svc.joinGame(gameId, userId, userName);
+    await svc.joinGame(gameId, userId, userName, password: password);
 
     // Controller initialisieren
     final controller = GameController.initializeInstance(gameId, svc);
@@ -39,6 +39,29 @@ class LobbyScreen extends StatelessWidget {
     if (context.mounted) {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => GameScreen(gameId: gameId)),
+      );
+    }
+  }
+
+  /// Für private Spiele: fragt das Passwort ab, bevor beigetreten wird.
+  /// Bereits beigetretene Spieler werden direkt durchgelassen (kein Prompt).
+  Future<void> _joinPossiblyPrivate(BuildContext context, GameMeta g) async {
+    if (!g.isPrivate || g.playerIds.contains(userId)) {
+      await _joinAndNavigate(context, g.id);
+      return;
+    }
+    final password = await showDialog<String>(
+      context: context,
+      builder: (_) => const _PasswordPromptDialog(),
+    );
+    if (password == null) return; // abgebrochen
+    if (!context.mounted) return;
+    try {
+      await _joinAndNavigate(context, g.id, password: password);
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Beitritt fehlgeschlagen: $e')),
       );
     }
   }
@@ -135,6 +158,10 @@ class LobbyScreen extends StatelessWidget {
                         itemBuilder: (_, i) {
                           final g = visible[i];
                           return ListTile(
+                            leading: g.isPrivate
+                                ? const Icon(Icons.lock,
+                                    color: Color.fromARGB(255, 201, 181, 1))
+                                : null,
                             title: Text(
                               g.name,
                               style: const TextStyle(
@@ -146,7 +173,7 @@ class LobbyScreen extends StatelessWidget {
                                   fontSize: 12,
                                   color: Color.fromARGB(179, 5, 3, 3)),
                             ),
-                            onTap: () => _joinAndNavigate(context, g.id),
+                            onTap: () => _joinPossiblyPrivate(context, g),
                           );
                         },
                       );
@@ -159,11 +186,11 @@ class LobbyScreen extends StatelessWidget {
                   padding: const EdgeInsets.all(8),
                   child: ElevatedButton(
                     onPressed: () async {
-                      final name = await showDialog<String>(
+                      final result = await showDialog<_NewGameResult>(
                         context: context,
                         builder: (_) => const _NewGameNameDialog(),
                       );
-                      if (name == null || name.trim().isEmpty) return;
+                      if (result == null || result.name.trim().isEmpty) return;
 
                       try {
                         final alreadyInGame =
@@ -179,8 +206,11 @@ class LobbyScreen extends StatelessWidget {
                         }
 
                         await _disposeControllerIfExists();
-                        final newGameId =
-                            await svc.createNewGame(name.trim(), userId);
+                        final newGameId = await svc.createNewGame(
+                          result.name.trim(),
+                          userId,
+                          password: result.password,
+                        );
                         if (!context.mounted) return;
                         await _joinAndNavigate(context, newGameId);
                       } catch (e) {
@@ -203,7 +233,13 @@ class LobbyScreen extends StatelessWidget {
   }
 }
 
-/// Dialog zur Eingabe des neuen Spielnamens
+class _NewGameResult {
+  final String name;
+  final String? password;
+  const _NewGameResult(this.name, this.password);
+}
+
+/// Dialog zur Eingabe des neuen Spielnamens, optional mit Passwortschutz
 class _NewGameNameDialog extends StatefulWidget {
   const _NewGameNameDialog();
 
@@ -212,15 +248,41 @@ class _NewGameNameDialog extends StatefulWidget {
 }
 
 class _NewGameNameDialogState extends State<_NewGameNameDialog> {
-  final _ctrl = TextEditingController();
+  final _nameCtrl = TextEditingController();
+  final _passwordCtrl = TextEditingController();
+  bool _isPrivate = false;
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _passwordCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
       title: const Text('Name für neues Spiel'),
-      content: TextField(
-        controller: _ctrl,
-        decoration: const InputDecoration(hintText: 'z.B. Freitagabend'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _nameCtrl,
+            decoration: const InputDecoration(hintText: 'z.B. Freitagabend'),
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Privates Spiel'),
+            value: _isPrivate,
+            onChanged: (v) => setState(() => _isPrivate = v),
+          ),
+          if (_isPrivate)
+            TextField(
+              controller: _passwordCtrl,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: 'Passwort'),
+            ),
+        ],
       ),
       actions: [
         TextButton(
@@ -228,8 +290,54 @@ class _NewGameNameDialogState extends State<_NewGameNameDialog> {
           child: const Text('Abbrechen'),
         ),
         ElevatedButton(
-          onPressed: () => Navigator.pop(context, _ctrl.text.trim()),
+          onPressed: () {
+            final password = _isPrivate ? _passwordCtrl.text.trim() : null;
+            if (_isPrivate && (password == null || password.isEmpty)) return;
+            Navigator.pop(context, _NewGameResult(_nameCtrl.text.trim(), password));
+          },
           child: const Text('Erstellen'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Fragt beim Beitritt zu einem privaten Spiel das Passwort ab.
+class _PasswordPromptDialog extends StatefulWidget {
+  const _PasswordPromptDialog();
+
+  @override
+  State<_PasswordPromptDialog> createState() => _PasswordPromptDialogState();
+}
+
+class _PasswordPromptDialogState extends State<_PasswordPromptDialog> {
+  final _ctrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Privates Spiel'),
+      content: TextField(
+        controller: _ctrl,
+        obscureText: true,
+        autofocus: true,
+        decoration: const InputDecoration(labelText: 'Passwort'),
+        onSubmitted: (_) => Navigator.pop(context, _ctrl.text),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, null),
+          child: const Text('Abbrechen'),
+        ),
+        ElevatedButton(
+          onPressed: () => Navigator.pop(context, _ctrl.text),
+          child: const Text('Beitreten'),
         ),
       ],
     );

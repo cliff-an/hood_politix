@@ -218,12 +218,13 @@ Future<List<String>> _loadValidPlayerOrder(String gameId) async {
 }
 
 
-  Future<String> createNewGame(String gameName, String userId) async {
+  Future<String> createNewGame(String gameName, String userId, {String? password}) async {
   try {
     final userName = await _fetchUserName(userId);
     final avatarUrl = resolveAvatarPath(await _fetchAvatarId(userId));
     final gameRef = _database.ref('games').push();
     final gameId = gameRef.key!;
+    final isPrivate = password != null && password.isNotEmpty;
 
     // Deck + Kartenobjekte erstellen
     final deck = Deck();
@@ -236,6 +237,7 @@ Future<List<String>> _loadValidPlayerOrder(String gameId) async {
     await gameRef.set({
       'meta': {
         'name': gameName, // 🔹 Spielname speichern
+        'isPrivate': isPrivate,
       },
       'players': {
         userId: {'name': userName, 'handCardIds': [], 'avatarUrl': avatarUrl},
@@ -252,6 +254,13 @@ Future<List<String>> _loadValidPlayerOrder(String gameId) async {
       'gameInfo': {'createdAt': ServerValue.timestamp},
       'cards': cardsData,
     });
+
+    // Passwort separat außerhalb von meta/ ablegen — meta/ wird von jedem
+    // Lobby-Client laufend live mitgelesen (getGamesMetaStream), das
+    // Passwort soll dort nicht automatisch mitgeschickt werden.
+    if (isPrivate) {
+      await gameRef.child('access/password').set(password);
+    }
 
     await _database.ref('users/$userId/currentGameId').set(gameId);
 
@@ -338,7 +347,24 @@ Future<List<String>> _loadValidPlayerOrder(String gameId) async {
     await _database.ref('games/$gameId/gameState').update({'currentPlayerId': userId});
   }
 
-  Future<void> joinGame(String gameId, String userId, String userName) async {
+  /// Wirft eine [Exception], wenn das Spiel passwortgeschützt ist und
+  /// [password] nicht passt. Bereits beigetretene Spieler (Reconnect/erneute
+  /// Navigation ins eigene Spiel) werden nicht erneut geprüft.
+  Future<void> _checkGamePassword(String gameId, String userId, String? password) async {
+    final playersRef = _database.ref('games/$gameId/players');
+    final alreadyJoined = (await playersRef.child(userId).get()).exists;
+    if (alreadyJoined) return;
+
+    final pwSnap = await _database.ref('games/$gameId/access/password').get();
+    if (!pwSnap.exists) return; // öffentliches Spiel
+
+    if (password == null || password != pwSnap.value.toString()) {
+      throw Exception('Falsches Passwort.');
+    }
+  }
+
+  Future<void> joinGame(String gameId, String userId, String userName, {String? password}) async {
+    await _checkGamePassword(gameId, userId, password);
     final avatarUrl = resolveAvatarPath(await _fetchAvatarId(userId));
     final playersRef = _database.ref('games/$gameId/players/$userId');
     await playersRef.set({'name': userName, 'handCardIds': [], 'avatarUrl': avatarUrl});

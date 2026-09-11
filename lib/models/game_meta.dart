@@ -5,6 +5,8 @@ class GameMeta {
   final int? endedAt;
   final List<String> playerIds;
   final String state; // ✅ HINZUGEFÜGT
+  final bool isPrivate;
+  final String? joinCode;
 
   GameMeta({
     required this.id,
@@ -13,6 +15,8 @@ class GameMeta {
     this.endedAt,
     required this.playerIds,
     required this.state, // ✅ HINZUGEFÜGT
+    this.isPrivate = false,
+    this.joinCode,
   });
 
   factory GameMeta.fromMap(String id, Map<String, dynamic> data) {
@@ -36,6 +40,8 @@ class GameMeta {
       endedAt: endedAt,
       playerIds: playerIds,
       state: state,
+      isPrivate: metaMap['isPrivate'] == true,
+      joinCode: metaMap['joinCode']?.toString(),
     );
   }
 }
