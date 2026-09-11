@@ -514,11 +514,11 @@ Future<List<String>> _loadValidPlayerOrder(String gameId) async {
       });
     }
     await gameRef.child('placements').set(placements);
-
-    // Profil-Status: niemand ist mehr "im Spiel", sobald es beendet ist.
-    await Future.wait(players.map(
-      (p) => _database.ref('users/${p.id}/currentGameId').remove(),
-    ));
+    // Profil-Status ("im Spiel") wird bewusst NICHT hier für alle Spieler
+    // gelöscht: die Security Rules erlauben nur Schreibzugriff auf die
+    // eigene users/$uid, ein Client kann also nicht für andere Spieler
+    // aufräumen. Jeder Client löscht stattdessen sein eigenes
+    // currentGameId selbst in removePlayerFromFinishedGame().
   }
 
   Future<void> notifyPlayersGameEnded(String gameId) async {
@@ -945,16 +945,21 @@ Stream<List<GameMeta>> getGamesMetaStream() {
 
     await gameRef.update(batch);
 
-    // Profil-Status: niemand ist mehr "im Spiel", sobald es beendet ist.
-    await Future.wait([leavingPlayerId, ...remainingIds].map(
-      (pid) => _database.ref('users/$pid/currentGameId').remove(),
-    ));
+    // Nur die eigene currentGameId kann hier geräumt werden (Security
+    // Rules erlauben nur Schreibzugriff auf die eigene users/$uid) —
+    // _endGameWithLeave läuft auf dem Client des Verlassenden, dessen
+    // eigene uid ist also `leavingPlayerId`. Die verbleibenden Spieler
+    // räumen ihr eigenes currentGameId über removePlayerFromFinishedGame()
+    // auf, sobald sie den GameOverScreen verlassen.
+    await _database.ref('users/$leavingPlayerId/currentGameId').remove();
   }
 
-  /// Entfernt den eigenen Spieler aus dem /players-Knoten eines beendeten Spiels.
+  /// Entfernt den eigenen Spieler aus dem /players-Knoten eines beendeten Spiels
+  /// und räumt den eigenen "im Spiel"-Profilstatus auf.
   /// Wird aufgerufen wenn der Spieler die Lobby betritt (nach GameOverScreen).
   Future<void> removePlayerFromFinishedGame(String gameId, String playerId) async {
     await _database.ref('games/$gameId/players/$playerId').remove();
+    await _database.ref('users/$playerId/currentGameId').remove();
   }
 
 

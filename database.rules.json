@@ -1,0 +1,171 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+
+    // 🔐 Benutzerprofile
+    "users": {
+      "$uid": {
+        // Jeder eingeloggte Nutzer darf JEDES Profil lesen (Profile/Freunde
+        // sind bewusst öffentlich "followbar" — siehe Lobby-Social-Features).
+        // Schreiben bleibt weiterhin nur dem Besitzer selbst vorbehalten.
+        ".read": "auth != null",
+        ".write": "auth != null && auth.uid === $uid",
+
+        // Freundschaften: eine Freundschaft betrifft immer zwei Konten. Die
+        // App schreibt sich selbst als Schlüssel unter den *anderen* Nutzer
+        // (z. B. users/A/friends/B, ausgelöst von B) — das erlauben wir
+        // gezielt, wenn der Schlüssel exakt der eigenen uid entspricht.
+        "friends": {
+          "$otherUid": {
+            ".write": "auth != null && $otherUid === auth.uid"
+          }
+        },
+
+        // Freundschaftsanfragen: gleiches Muster — man darf sich selbst als
+        // Absender/Empfänger-Eintrag unter dem jeweils anderen Nutzer
+        // eintragen bzw. wieder entfernen (annehmen/ablehnen/zurückziehen).
+        "friendRequests": {
+          "incoming": {
+            "$fromUid": {
+              ".write": "auth != null && $fromUid === auth.uid"
+            }
+          },
+          "outgoing": {
+            "$toUid": {
+              ".write": "auth != null && $toUid === auth.uid"
+            }
+          }
+        },
+
+        // Spiel-Einladungen: darf schreiben, wer selbst Teilnehmer des
+        // eingeladenen Spiels ist (keine Einladungen zu fremden Spielen).
+        "invites": {
+          "$gameId": {
+            ".write": "auth != null && root.child('games').child($gameId).child('players').child(auth.uid).exists()"
+          }
+        }
+      }
+    },
+
+    "usernames": {
+      ".read": true,
+      ".write": "!data.exists() && auth != null"
+    },
+
+    // 🔑 Beitritts-Codes: gleiches Muster wie usernames (offen lesbar,
+    // einmalig beschreibbar, nicht überschreibbar).
+    "joinCodes": {
+      ".read": "auth != null",
+      "$code": {
+        ".write": "auth != null && !data.exists()"
+      }
+    },
+
+    // 🎮 Hauptknoten für Spiele
+    "games": {
+      ".read": "auth != null",
+      "$gameId": {
+        // Zugriff auf gesamtes Spiel, wenn Spieler oder Lobby:
+        ".read": "auth != null && (
+          root.child('games').child($gameId).child('players').child(auth.uid).exists() ||
+          root.child('games').child($gameId).child('gameState').child('state').val() == 'waiting' ||
+          root.child('games').child($gameId).child('gameState').child('state').val() == 'waiting for players'
+        )",
+
+        // Schreiben nur, wenn Spieler oder Spiel neu:
+        ".write": "auth != null && (
+          !data.exists() ||
+          root.child('games').child($gameId).child('players').child(auth.uid).exists()
+        )",
+
+        // 👤 Spieler-Daten
+        "players": {
+          "$uid": {
+            // Spieler darf seine eigenen Daten lesen + andere Spieler, wenn er im Spiel ist:
+            ".read": "auth != null && (
+              auth.uid === $uid ||
+              root.child('games').child($gameId).child('players').child(auth.uid).exists()
+            )",
+            // Spieler darf nur sich selbst schreiben:
+            ".write": "auth != null && (
+              auth.uid === $uid ||
+              root.child('games').child($gameId).child('players').child(auth.uid).exists()
+            )"
+          }
+        },
+
+        // 🔄 Spiel-Zustand
+        "gameState": {
+          "state": {
+            ".read": true,
+            ".write": "auth != null &&
+              root.child('games').child($gameId).child('players').child(auth.uid).exists()"
+          },
+          "playerOrder":     { ".read": true, ".write": false },
+          "isClockwise":     { ".read": true, ".write": false },
+          "currentPlayerId": { ".read": true, ".write": false },
+
+          // ⏱️ Timer (alle Spieler dürfen sehen, currentPlayer darf schreiben)
+          "remainingTime": {
+            ".read": "auth != null && root.child('games').child($gameId).child('players').child(auth.uid).exists()",
+            ".write": "auth != null &&
+              root.child('games').child($gameId).child('currentPlayerId').val() == auth.uid"
+          },
+
+          // Platzierungen (alle sehen, Server/Spieler dürfen schreiben)
+          "placements": {
+            "$playerId": {
+              ".read": "auth != null &&
+                root.child('games').child($gameId).child('players').child(auth.uid).exists()",
+              ".write": "auth != null &&
+                root.child('games').child($gameId).child('players').child(auth.uid).exists()"
+            }
+          },
+
+          "mic": {
+            "$playerId": {
+              ".read": "auth != null &&
+                root.child('games').child($gameId).child('players').child(auth.uid).exists()",
+              ".write": "auth != null &&
+                auth.uid === $playerId &&
+                root.child('games').child($gameId).child('players').child(auth.uid).exists()"
+            }
+          },
+
+          "$other": { ".read": true, ".write": false }
+        },
+
+        // 🕵️ Snitch Aktionen
+        "snitchAction": {
+          ".read": "auth != null &&
+            root.child('games').child($gameId).child('players').child(auth.uid).exists()",
+          ".write": "auth != null &&
+            root.child('games').child($gameId).child('players').child(auth.uid).exists()"
+        },
+        "snitchReveal": {
+          ".read": "auth != null &&
+            root.child('games').child($gameId).child('players').child(auth.uid).exists()",
+          ".write": "auth != null &&
+            root.child('games').child($gameId).child('players').child(auth.uid).exists()"
+        },
+
+        // 🃏 Karten: während Snitch darf man sehen (Spieler ist im Spiel)
+        "cards": {
+          "$cardId": {
+            ".read": "auth != null && (
+              root.child('games').child($gameId).child('players').child(auth.uid).exists() ||
+              root.child('games').child($gameId).child('snitchAction/currentPlayerId').val() == auth.uid
+            )",
+            ".write": false
+          }
+        },
+
+        "gameInfo": {
+          ".read": "auth != null",
+          ".write": "auth != null"
+        }
+      }
+    }
+  }
+}
