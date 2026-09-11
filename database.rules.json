@@ -50,7 +50,16 @@
 
     "usernames": {
       ".read": true,
-      ".write": "!data.exists() && auth != null"
+      // WICHTIG: .write muss auf dem $username-Platzhalter stehen, nicht
+      // hier auf "usernames" selbst — sonst bezieht sich data.exists() auf
+      // den GESAMTEN usernames-Knoten (der schon Einträge hat) statt auf
+      // den einen angefragten Namen, und JEDE neue Registrierung schlägt
+      // fehl (genau das, was gerade live beobachtet wurde: claudetest1/2/3
+      // wurden nie in usernames/ eingetragen, obwohl der Auth-Nutzer +
+      // users/$uid erfolgreich angelegt wurden).
+      "$username": {
+        ".write": "!data.exists() && auth != null"
+      }
     },
 
     // 🔑 Beitritts-Codes: gleiches Muster wie usernames (offen lesbar,
