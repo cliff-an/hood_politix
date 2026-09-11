@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../models/firebase_service.dart';
 import '../models/game_meta.dart';
 import '../models/game_controller.dart';
+import 'friends_screen.dart';
 import 'game_screen.dart';
 import 'profile_screen.dart';
 
@@ -54,6 +55,13 @@ class LobbyScreen extends StatelessWidget {
         backgroundColor: Colors.transparent,
         elevation: 0,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.people),
+            tooltip: 'Freunde',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const FriendsScreen()),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.person),
             tooltip: 'Mein Profil',

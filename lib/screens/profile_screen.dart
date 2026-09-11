@@ -41,6 +41,22 @@ class ProfileScreen extends StatelessWidget {
               ? Map<String, dynamic>.from(profile['friends'] as Map)
               : <String, dynamic>{};
 
+          final requests = profile['friendRequests'] is Map
+              ? Map<String, dynamic>.from(profile['friendRequests'] as Map)
+              : <String, dynamic>{};
+          final incoming = requests['incoming'] is Map
+              ? Map<String, dynamic>.from(requests['incoming'] as Map)
+              : <String, dynamic>{};
+          final outgoing = requests['outgoing'] is Map
+              ? Map<String, dynamic>.from(requests['outgoing'] as Map)
+              : <String, dynamic>{};
+
+          final isFriend = friends.containsKey(myUid);
+          // Ich habe an diesen Nutzer angefragt (steht in dessen "incoming").
+          final requestFromMe = incoming.containsKey(myUid);
+          // Dieser Nutzer hat mich angefragt (steht in dessen "outgoing").
+          final requestFromThem = outgoing.containsKey(myUid);
+
           return SingleChildScrollView(
             padding: const EdgeInsets.all(24),
             child: Column(
@@ -84,6 +100,42 @@ class ProfileScreen extends StatelessWidget {
                   ),
                   label: Text(isInGame ? 'Ist im Spiel' : 'Nicht im Spiel'),
                 ),
+                if (!isOwnProfile) ...[
+                  const SizedBox(height: 16),
+                  if (isFriend)
+                    OutlinedButton.icon(
+                      icon: const Icon(Icons.person_remove),
+                      label: const Text('Freund entfernen'),
+                      onPressed: () => svc.removeFriend(myUid, uid),
+                    )
+                  else if (requestFromThem)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        ElevatedButton.icon(
+                          icon: const Icon(Icons.check),
+                          label: const Text('Anfrage annehmen'),
+                          onPressed: () => svc.acceptFriendRequest(myUid, uid),
+                        ),
+                        const SizedBox(width: 8),
+                        OutlinedButton(
+                          onPressed: () => svc.declineFriendRequest(myUid, uid),
+                          child: const Text('Ablehnen'),
+                        ),
+                      ],
+                    )
+                  else if (requestFromMe)
+                    const OutlinedButton(
+                      onPressed: null,
+                      child: Text('Anfrage gesendet'),
+                    )
+                  else
+                    ElevatedButton.icon(
+                      icon: const Icon(Icons.person_add),
+                      label: const Text('Freund hinzufügen'),
+                      onPressed: () => svc.sendFriendRequest(myUid, uid),
+                    ),
+                ],
                 const SizedBox(height: 24),
                 Align(
                   alignment: Alignment.centerLeft,

@@ -599,6 +599,65 @@ Future<List<String>> _loadValidPlayerOrder(String gameId) async {
     });
   }
 
+  // ---------- Freunde (gegenseitig: Anfrage + Bestätigung) ----------
+
+  /// Sucht einen Nutzer über den bestehenden usernames/$username-Index.
+  /// Gibt null zurück, wenn kein Treffer existiert.
+  Future<String?> findUserByUsername(String username) async {
+    final snap = await _database.ref('usernames/$username').get();
+    return snap.exists ? snap.value.toString() : null;
+  }
+
+  Future<void> sendFriendRequest(String fromUid, String toUid) async {
+    if (fromUid == toUid) return;
+    final now = ServerValue.timestamp;
+    await _database.ref().update({
+      'users/$toUid/friendRequests/incoming/$fromUid': now,
+      'users/$fromUid/friendRequests/outgoing/$toUid': now,
+    });
+  }
+
+  Future<void> acceptFriendRequest(String uid, String fromUid) async {
+    await _database.ref().update({
+      'users/$uid/friendRequests/incoming/$fromUid': null,
+      'users/$fromUid/friendRequests/outgoing/$uid': null,
+      'users/$uid/friends/$fromUid': true,
+      'users/$fromUid/friends/$uid': true,
+    });
+  }
+
+  Future<void> declineFriendRequest(String uid, String fromUid) async {
+    await _database.ref().update({
+      'users/$uid/friendRequests/incoming/$fromUid': null,
+      'users/$fromUid/friendRequests/outgoing/$uid': null,
+    });
+  }
+
+  Future<void> removeFriend(String uid, String otherUid) async {
+    await _database.ref().update({
+      'users/$uid/friends/$otherUid': null,
+      'users/$otherUid/friends/$uid': null,
+    });
+  }
+
+  /// Liste der Freundes-UIDs (Keys der friends-Map) als Live-Stream.
+  Stream<List<String>> getFriendsStream(String uid) {
+    return _database.ref('users/$uid/friends').onValue.map((event) {
+      if (!event.snapshot.exists || event.snapshot.value == null) return <String>[];
+      final map = Map<String, dynamic>.from(event.snapshot.value as Map);
+      return map.keys.map((e) => e.toString()).toList();
+    });
+  }
+
+  /// Eingehende Freundschaftsanfragen (UIDs der Absender) als Live-Stream.
+  Stream<List<String>> getIncomingFriendRequestsStream(String uid) {
+    return _database.ref('users/$uid/friendRequests/incoming').onValue.map((event) {
+      if (!event.snapshot.exists || event.snapshot.value == null) return <String>[];
+      final map = Map<String, dynamic>.from(event.snapshot.value as Map);
+      return map.keys.map((e) => e.toString()).toList();
+    });
+  }
+
   // ---------- Deck / Rundenfluss ----------
 
   Future<void> updateDeckInDatabase(String gameId, Deck deck) async {
