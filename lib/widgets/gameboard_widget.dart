@@ -110,11 +110,15 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
                     Container(
                       padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 10),
                       decoration: BoxDecoration(
-                        color: Colors.black54,
+                        color: currentPlayer.id == myId
+                            ? Colors.green.withValues(alpha: 0.85)
+                            : Colors.black54,
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
-                        '${currentPlayer.name} ist am Zug',
+                        currentPlayer.id == myId
+                            ? 'Du bist am Zug'
+                            : '${currentPlayer.name} ist am Zug',
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 13,
@@ -337,6 +341,23 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
                       shadows: [Shadow(blurRadius: 2)],
                     ),
                   ),
+                  if (ctrl.currentPlayerId == opp.id)
+                    Container(
+                      margin: const EdgeInsets.only(top: 2),
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: Colors.orangeAccent,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Text(
+                        'Am Zug',
+                        style: TextStyle(
+                          color: Colors.black,
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
                 ],
               ),
             );
