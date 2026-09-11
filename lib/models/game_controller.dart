@@ -133,14 +133,23 @@ class GameController extends ChangeNotifier {
         // Timer resetten
         _cancelTurnTimerInternal();
 
-        // Starte 5s Timeout nur für den lokalen Spieler
+        // Starte Timeout nur für den lokalen Spieler — und nur, wenn das
+        // Spiel wirklich läuft. currentPlayerId wird schon beim Erstellen
+        // des Spiels gesetzt (Ersteller ist "dran"), lange bevor gestartet
+        // wurde; ohne diese Prüfung läuft der Timer schon im Warteraum ab
+        // und beendet das Spiel für einen einzelnen wartenden Spieler
+        // (order.length < 2 in advanceToNextPlayer), bevor überhaupt ein
+        // zweiter Spieler/Freund beitreten konnte.
         final myId = FirebaseAuth.instance.currentUser?.uid;
         if (newId == myId) {
-          if (!hasFirstTurnStarted) {
-            Future.delayed(const Duration(seconds: 1), _startTurnTimerInternal);
-          } else {
-            _startTurnTimerInternal();
-          }
+          _gameRef.child('gameState/state').get().then((stateSnap) {
+            if (stateSnap.value?.toString() != 'in progress') return;
+            if (!hasFirstTurnStarted) {
+              Future.delayed(const Duration(seconds: 1), _startTurnTimerInternal);
+            } else {
+              _startTurnTimerInternal();
+            }
+          });
         }
       }
     });
