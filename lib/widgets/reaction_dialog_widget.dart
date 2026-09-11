@@ -12,12 +12,15 @@ class ReactionDialog extends StatelessWidget {
   final List<GameCard> reactableCards;
   final Future<void> Function(GameCard) onCardSelected;
   final Future<void> Function() onNoReaction;
+  /// Die zuletzt gespielte Karte, auf die reagiert werden kann/muss.
+  final GameCard? previousCard;
 
   const ReactionDialog({
     super.key,
     required this.reactableCards,
     required this.onCardSelected,
     required this.onNoReaction,
+    this.previousCard,
   });
 
   @override
@@ -31,6 +34,30 @@ class ReactionDialog extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // ---- Zuvor gespielte Karte, auf die reagiert wird ----
+            if (previousCard != null) ...[
+              const Text(
+                'Gespielte Karte:',
+                style: TextStyle(fontSize: 12, color: Colors.black54),
+              ),
+              const SizedBox(height: 4),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Image.asset(
+                    CardImageFactory.getCardImagePath(previousCard!),
+                    width: 50,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    previousCard.toString(),
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+              const Divider(height: 24),
+            ],
+
             // ---- Auswahl der möglichen Reaktionskarten ----
             if (reactableCards.isNotEmpty)
               ...reactableCards.map(

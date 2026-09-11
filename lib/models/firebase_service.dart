@@ -1468,6 +1468,13 @@ Future<void> advanceToNextPlayer(String gameId) async {
     if (reactionCard.actionType == ActionType.fiveO) {
       await updateCounters(gameId, 0, 0);
       await ref.remove();
+      // gameState/currentPlayerId is never updated when a reaction is first
+      // offered (setReactions only writes the reactions node), so it can
+      // still point at the original source player here. Pin it to the
+      // player who just reacted before advancing, otherwise
+      // advanceToNextPlayer resumes from the source and hands the turn
+      // right back to the reactor instead of the player after them.
+      await _database.ref('games/$gameId/gameState/currentPlayerId').set(reactingPlayerId);
       await advanceToNextPlayer(gameId);
       return;
     }
@@ -1531,6 +1538,9 @@ Future<void> advanceToNextPlayer(String gameId) async {
         final after = await getNextPlayerRelativeTo(gameId, penaltyReceiver);
         await _database.ref('games/$gameId/gameState/currentPlayerId').set(after);
       } else {
+        // Same stale-currentPlayerId issue as the Five-O branch above:
+        // pin it to the reactor before advancing.
+        await _database.ref('games/$gameId/gameState/currentPlayerId').set(reactingPlayerId);
         await advanceToNextPlayer(gameId);
       }
 

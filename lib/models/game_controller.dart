@@ -334,9 +334,15 @@ class GameController extends ChangeNotifier {
         return;
       }
 
+      final rawChain = data['reactionChain'] as List? ?? [];
+      final previousCard = rawChain.isNotEmpty
+          ? GameCard.fromMap(Map<String, dynamic>.from(rawChain.last as Map))
+          : null;
+
       await DialogManager.showAppDialog<void>(
         ReactionDialog(
           reactableCards: reactable,
+          previousCard: previousCard,
           onCardSelected: (selected) async {
             await firebaseService.continueReactionChain(
               gameId, me, selected as ActionCard,
@@ -490,6 +496,7 @@ class GameController extends ChangeNotifier {
     await DialogManager.showAppDialog<void>(
       ReactionDialog(
         reactableCards: reactables,
+        previousCard: playedCard,
         onCardSelected: (GameCard card) async {
           await FirebaseService.instance.continueReactionChain(
             gameId, targetPlayerId, card as ActionCard,

@@ -273,34 +273,53 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
                     ],
                   ),
                   const SizedBox(height: 4),
-                  // Glow when it's this opponent's turn
+                  // Glow + feste Umrandung, wenn dieser Gegner am Zug ist
                   if (ctrl.currentPlayerId == opp.id)
                     SizedBox(
-                      width: 56,
-                      height: 56,
+                      width: 64,
+                      height: 64,
                       child: Stack(
                         alignment: Alignment.center,
                         clipBehavior: Clip.none,
                         children: [
+                          // Pulsierendes Glühen als zusätzlicher Blickfang
                           AnimatedBuilder(
                             animation: _pulseCtrl,
                             builder: (_, __) {
                               final t = _pulseCtrl.value;
-                              final d = 40.0 + 16.0 * t;
+                              final d = 48.0 + 16.0 * t;
                               return Container(
                                 width: d,
                                 height: d,
                                 decoration: BoxDecoration(
                                   shape: BoxShape.circle,
                                   color: Colors.orangeAccent
-                                      .withValues(alpha: 0.70 - 0.35 * t),
+                                      .withValues(alpha: 0.55 - 0.30 * t),
                                 ),
                               );
                             },
                           ),
-                          CircleAvatar(
-                            radius: 20,
-                            backgroundImage: AssetImage(ctrl.playerAvatar(opp.id)),
+                          // Feste, immer sichtbare Umrandung (unabhängig von der Animation)
+                          Container(
+                            width: 46,
+                            height: 46,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: Colors.orangeAccent,
+                                width: 3.5,
+                              ),
+                              boxShadow: const [
+                                BoxShadow(
+                                  color: Colors.black54,
+                                  blurRadius: 4,
+                                ),
+                              ],
+                            ),
+                            child: CircleAvatar(
+                              radius: 20,
+                              backgroundImage: AssetImage(ctrl.playerAvatar(opp.id)),
+                            ),
                           ),
                         ],
                       ),
