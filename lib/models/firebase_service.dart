@@ -263,7 +263,7 @@ Future<List<String>> _loadValidPlayerOrder(String gameId) async {
     }
 
     await assignJoinCode(gameId);
-    await _database.ref('users/$userId/currentGameId').set(gameId);
+    await _setCurrentGameWithPresence(userId, gameId);
 
     return gameId;
   } catch (e) {
@@ -381,7 +381,19 @@ Future<List<String>> _loadValidPlayerOrder(String gameId) async {
       await orderRef.set(order);
     }
 
-    await _database.ref('users/$userId/currentGameId').set(gameId);
+    await _setCurrentGameWithPresence(userId, gameId);
+  }
+
+  /// Setzt currentGameId und registriert gleichzeitig eine `onDisconnect`-
+  /// Regel: bricht die Verbindung ab (App gekillt, Netzwerk weg, Tab zu),
+  /// ohne dass leaveGame() je aufgerufen wurde, löscht der Firebase-Server
+  /// selbst dieses Feld — ohne das würde der "im Spiel"-Status auf dem
+  /// Profil für immer hängen bleiben. Braucht keine Cloud Function, ist
+  /// ein eingebautes RTDB-Feature.
+  Future<void> _setCurrentGameWithPresence(String userId, String gameId) async {
+    final ref = _database.ref('users/$userId/currentGameId');
+    await ref.set(gameId);
+    await ref.onDisconnect().remove();
   }
 
   Future<String> getCurrentUserName(String userId) async {
@@ -902,9 +914,17 @@ Future<List<String>> _loadValidPlayerOrder(String gameId) async {
   }
 
 
-  // Stream-Version für Live-Lobby
+  // Stream-Version für Live-Lobby. Begrenzt auf die 50 zuletzt erstellten
+  // Spiele (wie das bereits vorhandene getAvailableGames()) — vorher wurde
+  // bei jeder Änderung der KOMPLETTE games-Knoten an jeden Lobby-Client neu
+  // übertragen, unbegrenzt wachsend mit jedem je erstellten Spiel.
 Stream<List<GameMeta>> getGamesMetaStream() {
-  return _database.ref('games').onValue.map((event) {
+  return _database
+      .ref('games')
+      .orderByChild('gameInfo/createdAt')
+      .limitToLast(50)
+      .onValue
+      .map((event) {
     if (!event.snapshot.exists || event.snapshot.value == null) return [];
     final map = Map<String, dynamic>.from(event.snapshot.value as Map);
     return map.entries
@@ -1030,19 +1050,20 @@ Stream<List<GameMeta>> getGamesMetaStream() {
   }
 
 // Prüft, ob Spieler schon in einem laufenden Spiel ist (beendete Spiele werden ignoriert)
+// Zwei kleine, gezielte Reads statt eines Downloads des kompletten
+// games-Knotens bei jedem Versuch, ein neues Spiel zu erstellen.
+// users/$uid/currentGameId (Phase 1 der Lobby-Social-Features) trägt
+// bereits genau diese Information; der zweite Read prüft nur noch, ob das
+// referenzierte Spiel nicht doch schon (z. B. durch onDisconnect-Latenz)
+// beendet ist.
 Future<bool> isPlayerAlreadyInGame(String playerId) async {
-  final snap = await _database.ref('games').get();
-  if (!snap.exists || snap.value == null) return false;
-  final games = Map<String, dynamic>.from(snap.value as Map);
-  for (final g in games.entries) {
-    final gameData = g.value as Map?;
-    if (gameData == null) continue;
-    final state = (gameData['gameState'] as Map?)?['state']?.toString() ?? '';
-    if (state == 'finished') continue;
-    final players = (gameData['players'] as Map?) ?? {};
-    if (players.containsKey(playerId)) return true;
-  }
-  return false;
+  final gameIdSnap = await _database.ref('users/$playerId/currentGameId').get();
+  final gameId = gameIdSnap.value?.toString();
+  if (gameId == null || gameId.isEmpty) return false;
+
+  final stateSnap = await _database.ref('games/$gameId/gameState/state').get();
+  final state = stateSnap.value?.toString();
+  return state != null && state != 'finished';
 }
 
 

@@ -200,15 +200,18 @@ class LobbyScreen extends StatelessWidget {
 
                       final visible = <GameMeta>[];
                       for (var g in snap.data ?? []) {
-                        // ⏰ Abgelaufene Spiele löschen
-                        if (g.endedAt != null &&
-                            now - g.endedAt! > endedExpiry) {
-                          svc.deleteGame(g.id);
-                          continue;
-                        }
-
-                        if (now - g.createdAt > createdExpiry) {
-                          svc.deleteGame(g.id);
+                        // ⏰ Abgelaufene Spiele werden für alle ausgeblendet,
+                        // aber nur gelöscht, wenn der Viewer selbst Teilnehmer
+                        // ist — die Security Rules erlauben ohnehin nur
+                        // Teilnehmern das Löschen; ein Versuch bei fremden
+                        // Spielen würde bei jedem Stream-Update erneut
+                        // fehlschlagen und nichts bewirken außer
+                        // Konsolenrauschen.
+                        final isExpired = (g.endedAt != null &&
+                                now - g.endedAt! > endedExpiry) ||
+                            now - g.createdAt > createdExpiry;
+                        if (isExpired) {
+                          if (g.playerIds.contains(userId)) svc.deleteGame(g.id);
                           continue;
                         }
 

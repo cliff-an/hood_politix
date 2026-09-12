@@ -82,6 +82,10 @@
     // 🎮 Hauptknoten für Spiele
     "games": {
       ".read": "auth != null",
+      // Nötig für orderByChild('gameInfo/createdAt').limitToLast(...) in
+      // getGamesMetaStream()/getAvailableGames() — ohne Index sortiert der
+      // Server clientseitig, was mit wachsender Spielanzahl langsamer wird.
+      ".indexOn": ["gameInfo/createdAt"],
       "$gameId": {
         // Zugriff auf gesamtes Spiel, wenn Spieler oder Lobby:
         ".read": "auth != null && (
