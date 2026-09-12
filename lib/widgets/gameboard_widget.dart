@@ -24,6 +24,7 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
   late final AnimationController _pulseCtrl;
   late final AnimationController _popCtrl;
   late final Animation<double> _popAnim;
+  late final AnimationController _directionCtrl;
   final GlobalKey _discardKey = GlobalKey();
   int _lastHandCount = 0;
   late Future<GameMeta> _gameMetaFuture;
@@ -42,12 +43,19 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
       duration: const Duration(milliseconds: 400),
     );
     _popAnim = CurvedAnimation(parent: _popCtrl, curve: Curves.elasticOut);
+
+    // Langsame, endlose Drehung für den Richtungspfeil in der Tischmitte.
+    _directionCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 6),
+    )..repeat();
   }
 
   @override
   void dispose() {
     _pulseCtrl.dispose();
     _popCtrl.dispose();
+    _directionCtrl.dispose();
     super.dispose();
   }
 
@@ -165,6 +173,62 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
     final stackW = cardW * 0.9;
     final deckCenter = Offset(size.width * 0.4, size.height * 0.5);
     final discCenter = Offset(size.width * 0.6, size.height * 0.5);
+
+    // Richtungsanzeige: rotierender Doppelpfeilring zwischen Deck und
+    // Ablagestapel, spiegelt bei Gegenuhrzeigersinn (Payback-Karte). Dunkle
+    // Scheibe dahinter, sonst geht das Orange im bunten Hintergrundbild unter.
+    final tableCenter = Offset((deckCenter.dx + discCenter.dx) / 2, deckCenter.dy);
+    final ringSize = (discCenter.dx - deckCenter.dx) + stackW * 1.25;
+    const directionColor = Color(0xFFFFA542);
+    layers.add(Positioned(
+      left: tableCenter.dx - ringSize / 2,
+      top: tableCenter.dy - ringSize / 2,
+      child: IgnorePointer(
+        child: SizedBox(
+          width: ringSize,
+          height: ringSize,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              // Feste, dunkle Kontrastscheibe (dreht sich nicht mit)
+              Container(
+                width: ringSize * 0.94,
+                height: ringSize * 0.94,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.black.withValues(alpha: 0.42),
+                  boxShadow: [
+                    BoxShadow(
+                      color: directionColor.withValues(alpha: 0.6),
+                      blurRadius: 24,
+                      spreadRadius: 1,
+                    ),
+                  ],
+                ),
+              ),
+              Transform(
+                alignment: Alignment.center,
+                transform: ctrl.isClockwise ? Matrix4.identity() : Matrix4.rotationY(pi),
+                child: AnimatedBuilder(
+                  animation: _directionCtrl,
+                  builder: (_, __) {
+                    return Transform.rotate(
+                      angle: _directionCtrl.value * 2 * pi,
+                      child: Icon(
+                        Icons.autorenew,
+                        size: ringSize * 0.8,
+                        color: directionColor,
+                        shadows: const [Shadow(blurRadius: 10, color: Colors.black87)],
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ));
 
     // Deck
     layers.add(Positioned(

@@ -158,44 +158,170 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
+  InputDecoration _fieldDecoration(String label, IconData icon) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle: const TextStyle(color: Colors.white70),
+      prefixIcon: Icon(icon, color: Colors.white70),
+      filled: true,
+      fillColor: Colors.white.withValues(alpha: 0.08),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.18)),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.18)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: Color(0xFFF0A65C), width: 2),
+      ),
+    );
+  }
+
+  Widget _branding(double logoSize) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(logoSize * 0.21),
+          child: Image.asset('lib/images/logo.png', width: logoSize, height: logoSize),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          'HOOD POLITIX',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: logoSize > 100 ? 26 : 20,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 3,
+            shadows: const [Shadow(blurRadius: 12, color: Colors.black87)],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _formCard() {
+    return Container(
+      width: 320,
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'Willkommen zurück',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.9),
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 18),
+          TextField(
+            controller: _usernameController,
+            style: const TextStyle(color: Colors.white),
+            decoration: _fieldDecoration('Benutzername', Icons.person_outline),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _passwordController,
+            style: const TextStyle(color: Colors.white),
+            decoration: _fieldDecoration('Passwort', Icons.lock_outline),
+            obscureText: true,
+            onSubmitted: (_) => _signIn(),
+          ),
+          const SizedBox(height: 20),
+          if (_isLoading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: CircularProgressIndicator(color: Color(0xFFF0A65C)),
+            )
+          else ...[
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFE0722C),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: _signIn,
+                child: const Text('Anmelden', style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: _showRegisterDialog,
+              style: TextButton.styleFrom(foregroundColor: const Color(0xFFF0A65C)),
+              child: const Text('Neues Konto registrieren'),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Login / Registrierung')),
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: _usernameController,
-                decoration: const InputDecoration(labelText: 'Benutzername'),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.asset('lib/images/background.png', fit: BoxFit.cover),
+          // Abdunkeln für Lesbarkeit, stärker an den Rändern
+          Container(
+            decoration: const BoxDecoration(
+              gradient: RadialGradient(
+                center: Alignment.center,
+                radius: 1.1,
+                colors: [Colors.black38, Colors.black87],
               ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _passwordController,
-                decoration: const InputDecoration(labelText: 'Passwort'),
-                obscureText: true,
-              ),
-              const SizedBox(height: 24),
-              if (_isLoading)
-                const CircularProgressIndicator()
-              else ...[
-                ElevatedButton(
-                  onPressed: _signIn,
-                  child: const Text('Anmelden'),
-                ),
-                TextButton(
-                  onPressed: _showRegisterDialog,
-                  child: const Text('Registrieren'),
-                ),
-              ],
-            ],
+            ),
           ),
-        ),
+          SafeArea(
+            child: Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                // Nebeneinander, wenn Platz da ist (normales Querformat);
+                // untereinander auf schmalen Fenstern/Splitscreen, damit
+                // nichts über den Rand hinausläuft.
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final wide = constraints.maxWidth >= 560;
+                    if (wide) {
+                      return Row(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          _branding(132),
+                          const SizedBox(width: 56),
+                          _formCard(),
+                        ],
+                      );
+                    }
+                    return Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _branding(88),
+                        const SizedBox(height: 20),
+                        _formCard(),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
-
     );
   }
 }

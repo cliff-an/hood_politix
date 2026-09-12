@@ -83,7 +83,13 @@ class MyGameApp extends StatelessWidget {
         navigatorKey: navigatorKey,
         debugShowCheckedModeBanner: false,
         title: 'Hood Politix',
-        theme: ThemeData(primarySwatch: Colors.blue),
+        theme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: const Color(0xFFE0722C), // warmes Sonnenuntergangs-Orange aus dem Logo
+            brightness: Brightness.dark,
+          ),
+          useMaterial3: true,
+        ),
         builder: (context, child) {
         DialogManager.setRootContext(context); // ✅ hier setzen
     return child!;

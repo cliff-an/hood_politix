@@ -8,7 +8,7 @@ import '../models/card_image_factory.dart';
 import '../widgets/mic_action_button.dart';
 
 /// Dialog, der erscheint, wenn ein Spieler auf eine Aktionskarte reagieren kann.
-class ReactionDialog extends StatelessWidget {
+class ReactionDialog extends StatefulWidget {
   final List<GameCard> reactableCards;
   final Future<void> Function(GameCard) onCardSelected;
   final Future<void> Function() onNoReaction;
@@ -24,9 +24,33 @@ class ReactionDialog extends StatelessWidget {
   });
 
   @override
+  State<ReactionDialog> createState() => _ReactionDialogState();
+}
+
+class _ReactionDialogState extends State<ReactionDialog> with SingleTickerProviderStateMixin {
+  late final AnimationController _glowCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _glowCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _glowCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final myId = FirebaseAuth.instance.currentUser!.uid;
     final gameId = DialogManager.currentGameId!; // sicheres Game-Id-Handling
+    final reactableCards = widget.reactableCards;
+    final previousCard = widget.previousCard;
 
     return AlertDialog(
       title: const Text('Reaktion wählen'),
@@ -34,21 +58,47 @@ class ReactionDialog extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // ---- Zuvor gespielte Karte, auf die reagiert wird ----
+            // ---- Zuvor gespielte Karte, auf die reagiert wird — pulsiert,
+            // damit sofort klar ist, worauf gerade reagiert werden muss.
             if (previousCard != null) ...[
-              const Text(
+              Text(
                 'Gespielte Karte:',
-                style: TextStyle(fontSize: 12, color: Colors.black54),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 6),
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Image.asset(
-                    CardImageFactory.getCardImagePath(previousCard!),
-                    width: 50,
+                  AnimatedBuilder(
+                    animation: _glowCtrl,
+                    builder: (_, child) {
+                      final t = _glowCtrl.value;
+                      return Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(10),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFFF0A65C).withValues(alpha: 0.35 + 0.35 * t),
+                              blurRadius: 6 + 10 * t,
+                              spreadRadius: 1 + 2 * t,
+                            ),
+                          ],
+                        ),
+                        child: child,
+                      );
+                    },
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: Image.asset(
+                        CardImageFactory.getCardImagePath(previousCard),
+                        width: 54,
+                      ),
+                    ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 10),
                   Text(
                     previousCard.toString(),
                     style: const TextStyle(fontWeight: FontWeight.bold),
@@ -68,7 +118,7 @@ class ReactionDialog extends StatelessWidget {
                   ),
                   title: Text(card.toString()),
                   onTap: () async {
-                    await onCardSelected(card);
+                    await widget.onCardSelected(card);
                     DialogManager.closeDialog();
                   },
                 ),
@@ -131,7 +181,7 @@ class ReactionDialog extends StatelessWidget {
         TextButton(
           child: const Text('Keine Reaktion'),
           onPressed: () async {
-            await onNoReaction();
+            await widget.onNoReaction();
             DialogManager.closeDialog();
           },
         ),

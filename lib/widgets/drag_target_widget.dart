@@ -76,14 +76,32 @@ class DragTargetWidget extends StatelessWidget {
                     ]
                   : null,
             ),
-            child: topCard != null
-                ? Image.asset(CardImageFactory.getCardImagePath(topCard!))
-                : const Center(
-                    child: Text(
-                      "Ablegen",
-                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                    ),
-                  ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(13),
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 320),
+                // Karte "poppt" beim Erscheinen rein statt sich einfach
+                // ohne Übergang auszutauschen — macht sichtbar, welche
+                // Karte gerade gespielt wurde (eigene, gegnerische oder
+                // Reaktionskarte, alle laufen über denselben topCard-Wert).
+                transitionBuilder: (child, animation) => ScaleTransition(
+                  scale: CurvedAnimation(parent: animation, curve: Curves.easeOutBack),
+                  child: FadeTransition(opacity: animation, child: child),
+                ),
+                child: topCard != null
+                    ? Image.asset(
+                        CardImageFactory.getCardImagePath(topCard!),
+                        key: ValueKey(topCard!.id),
+                      )
+                    : const Center(
+                        key: ValueKey('empty'),
+                        child: Text(
+                          "Ablegen",
+                          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+              ),
+            ),
           );
         },
       ),
