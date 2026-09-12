@@ -44,6 +44,11 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
+# Native Android/Gradle build output (separate from Flutter's own /build/)
+/android/.gradle/
+/android/build/
+/android/app/build/
+
 # --- Secrets / signing (never commit) ---
 **/key.properties
 **/*.jks
