@@ -626,6 +626,66 @@ Future<List<String>> _loadValidPlayerOrder(String gameId) async {
     });
   }
 
+  /// Erneute Anmeldung vor dem Löschen des Kontos, falls Firebase
+  /// "requires-recent-login" wirft (Sitzung zu alt für eine so sensible
+  /// Aktion).
+  Future<void> reauthenticate(String username, String password) async {
+    final user = _auth.currentUser;
+    if (user == null) throw Exception('Nicht angemeldet.');
+    final cred = EmailAuthProvider.credential(
+      email: '$username@yourapp.com',
+      password: password,
+    );
+    await user.reauthenticateWithCredential(cred);
+  }
+
+  /// Löscht das Konto vollständig: eigenes Profil, Usernamen-Reservierung,
+  /// Einträge in fremden Freundeslisten/Anfragen (dort darf nur die eigene
+  /// uid als Schlüssel entfernt werden — erlaubt laut Security Rules),
+  /// verlässt ein laufendes Spiel falls nötig, und zuletzt den Auth-Account
+  /// selbst. Kann `requires-recent-login` werfen — dann vorher
+  /// [reauthenticate] aufrufen und erneut versuchen.
+  Future<void> deleteAccount(String uid) async {
+    final snap = await _database.ref('users/$uid').get();
+    final data = snap.exists ? Map<String, dynamic>.from(snap.value as Map) : <String, dynamic>{};
+    final username = data['username']?.toString();
+    final currentGameId = data['currentGameId']?.toString();
+
+    if (currentGameId != null && currentGameId.isNotEmpty) {
+      try {
+        await leaveGame(currentGameId, uid);
+      } catch (_) {
+        // Spiel evtl. schon beendet/gelöscht — für die Kontolöschung egal.
+      }
+    }
+
+    final friends = data['friends'] is Map ? Map<String, dynamic>.from(data['friends'] as Map) : {};
+    final requests = data['friendRequests'] is Map ? Map<String, dynamic>.from(data['friendRequests'] as Map) : {};
+    final incoming = requests['incoming'] is Map ? Map<String, dynamic>.from(requests['incoming'] as Map) : {};
+    final outgoing = requests['outgoing'] is Map ? Map<String, dynamic>.from(requests['outgoing'] as Map) : {};
+
+    final cleanup = <String, dynamic>{};
+    for (final otherUid in friends.keys) {
+      cleanup['users/$otherUid/friends/$uid'] = null;
+    }
+    for (final fromUid in incoming.keys) {
+      cleanup['users/$fromUid/friendRequests/outgoing/$uid'] = null;
+    }
+    for (final toUid in outgoing.keys) {
+      cleanup['users/$toUid/friendRequests/incoming/$uid'] = null;
+    }
+    if (cleanup.isNotEmpty) {
+      await _database.ref().update(cleanup);
+    }
+
+    if (username != null && username.isNotEmpty) {
+      await _database.ref('usernames/$username').remove();
+    }
+    await _database.ref('users/$uid').remove();
+
+    await _auth.currentUser?.delete();
+  }
+
   // ---------- Freunde (gegenseitig: Anfrage + Bestätigung) ----------
 
   /// Sucht einen Nutzer über den bestehenden usernames/$username-Index.

@@ -12,6 +12,14 @@
         ".read": "auth != null",
         ".write": "auth != null && auth.uid === $uid",
 
+        // Defense in depth: der Client validiert Benutzernamen schon vor
+        // dem Absenden (3-20 Zeichen, [A-Za-z0-9_-]), das hier spiegelt es
+        // serverseitig. Schützt nicht die Eindeutigkeit (das macht der
+        // usernames/-Knoten unten) — nur Format/Länge des Werts.
+        "username": {
+          ".validate": "!newData.exists() || newData.val().matches(/^[A-Za-z0-9_-]{3,20}$/)"
+        },
+
         // Freundschaften: eine Freundschaft betrifft immer zwei Konten. Die
         // App schreibt sich selbst als Schlüssel unter den *anderen* Nutzer
         // (z. B. users/A/friends/B, ausgelöst von B) — das erlauben wir

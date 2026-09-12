@@ -155,11 +155,143 @@ class ProfileScreen extends StatelessWidget {
                       return _FriendAvatar(uid: friendUid, svc: svc);
                     }).toList(),
                   ),
+                if (isOwnProfile) ...[
+                  const SizedBox(height: 48),
+                  const Divider(),
+                  const SizedBox(height: 8),
+                  TextButton.icon(
+                    icon: const Icon(Icons.delete_forever, color: Colors.red),
+                    label: const Text('Konto löschen', style: TextStyle(color: Colors.red)),
+                    onPressed: () => _deleteAccountFlow(context, svc, uid, username),
+                  ),
+                ],
               ],
             ),
           );
         },
       ),
+    );
+  }
+}
+
+/// Bestätigungsdialog + Löschvorgang, inkl. Re-Authentifizierung falls
+/// Firebase eine zu alte Sitzung für diese sensible Aktion ablehnt.
+Future<void> _deleteAccountFlow(
+  BuildContext context,
+  FirebaseService svc,
+  String uid,
+  String username,
+) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Konto wirklich löschen?'),
+      content: const Text(
+        'Dein Profil, deine Freundschaften und dein Zugang werden endgültig '
+        'gelöscht. Das kann nicht rückgängig gemacht werden.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(ctx).pop(false),
+          child: const Text('Abbrechen'),
+        ),
+        TextButton(
+          style: TextButton.styleFrom(foregroundColor: Colors.red),
+          onPressed: () => Navigator.of(ctx).pop(true),
+          child: const Text('Endgültig löschen'),
+        ),
+      ],
+    ),
+  );
+  if (confirmed != true || !context.mounted) return;
+
+  try {
+    await svc.deleteAccount(uid);
+    // AuthGate ist die Wurzel-Route (home:) und erkennt den fehlenden
+    // Auth-Nutzer automatisch — zurückpoppen genügt, dann zeigt es von
+    // selbst den Login-Screen statt des jetzt gelöschten Profils.
+    if (context.mounted) {
+      Navigator.of(context).popUntil((route) => route.isFirst);
+    }
+  } on FirebaseAuthException catch (e) {
+    if (!context.mounted) return;
+    if (e.code != 'requires-recent-login') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Löschen fehlgeschlagen: ${e.message ?? e.code}')),
+      );
+      return;
+    }
+    final password = await showDialog<String>(
+      context: context,
+      builder: (_) => const _ReauthDialog(),
+    );
+    if (password == null || !context.mounted) return;
+    try {
+      await svc.reauthenticate(username, password);
+      await svc.deleteAccount(uid);
+      if (context.mounted) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
+    } catch (e2) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Löschen fehlgeschlagen: $e2')),
+        );
+      }
+    }
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Löschen fehlgeschlagen: $e')),
+      );
+    }
+  }
+}
+
+class _ReauthDialog extends StatefulWidget {
+  const _ReauthDialog();
+
+  @override
+  State<_ReauthDialog> createState() => _ReauthDialogState();
+}
+
+class _ReauthDialogState extends State<_ReauthDialog> {
+  final _ctrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Passwort bestätigen'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text('Deine Anmeldung ist zu alt für diese Aktion. Bitte Passwort erneut eingeben.'),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _ctrl,
+            obscureText: true,
+            autofocus: true,
+            decoration: const InputDecoration(labelText: 'Passwort'),
+            onSubmitted: (_) => Navigator.of(context).pop(_ctrl.text),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Abbrechen'),
+        ),
+        ElevatedButton(
+          onPressed: () => Navigator.of(context).pop(_ctrl.text),
+          child: const Text('Bestätigen'),
+        ),
+      ],
     );
   }
 }

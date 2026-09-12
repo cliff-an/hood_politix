@@ -13,6 +13,12 @@ class LoginScreen extends StatefulWidget {
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
+/// 3-20 Zeichen, nur Buchstaben/Zahlen/"_"/"-" — verhindert u.a. Zeichen wie
+/// ".", "#", "$", "[", "]", "/", die als Firebase-Realtime-Database-Key
+/// verboten sind (sonst scheitert die usernames/-Reservierung mit einem
+/// kryptischen Fehler statt einer verständlichen Meldung).
+final RegExp _usernamePattern = RegExp(r'^[A-Za-z0-9_-]{3,20}$');
+
 class _LoginScreenState extends State<LoginScreen> {
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
@@ -74,6 +80,22 @@ class _LoginScreenState extends State<LoginScreen> {
     if (username.isEmpty || password.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Bitte Benutzername und Passwort eingeben.')),
+      );
+      return;
+    }
+    if (!_usernamePattern.hasMatch(username)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Benutzername: 3-20 Zeichen, nur Buchstaben, Zahlen, "_" und "-".',
+          ),
+        ),
+      );
+      return;
+    }
+    if (password.length < 6) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Passwort muss mindestens 6 Zeichen haben.')),
       );
       return;
     }
