@@ -130,6 +130,19 @@ class LobbyScreen extends StatelessWidget {
               fit: BoxFit.cover,
             ),
           ),
+          const Positioned.fill(
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: RadialGradient(
+                    center: Alignment.center,
+                    radius: 1.05,
+                    colors: [Colors.transparent, Colors.black45],
+                  ),
+                ),
+              ),
+            ),
+          ),
           SafeArea(
             child: Column(
               children: [

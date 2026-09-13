@@ -11,6 +11,10 @@ class DragTargetWidget extends StatelessWidget {
   final bool isEnabled;           // true = aktiver Spieler dran
   final String currentPlayerId;
   final Function(GameCard) onCardDropped;
+  // Kartenbreite — gleiche Konvention wie AnimatedDeck/PlayerHand
+  // (Höhe = cardWidth * 1.5), damit Ablagestapel, Deck und Handkarten
+  // gleich groß wirken statt der vorherigen festen 150x180px.
+  final double cardWidth;
 
   const DragTargetWidget({
     super.key,
@@ -19,6 +23,7 @@ class DragTargetWidget extends StatelessWidget {
     required this.isEnabled,
     required this.currentPlayerId,
     required this.onCardDropped,
+    required this.cardWidth,
   });
 
   @override
@@ -58,8 +63,8 @@ class DragTargetWidget extends StatelessWidget {
         builder: (ctx, candidateData, rejectedData) {
           final hovering = candidateData.isNotEmpty;
           return Container(
-            width: 150,
-            height: 180,
+            width: cardWidth,
+            height: cardWidth * 1.5,
             decoration: BoxDecoration(
               border: Border.all(
                 color: hovering ? Colors.greenAccent : Colors.black,

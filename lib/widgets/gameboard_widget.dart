@@ -128,6 +128,22 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
     layers.add(Positioned.fill(
       child: Image.asset('lib/images/background.png', fit: BoxFit.cover),
     ));
+    // Leichte Abdunkelung zu den Rändern hin — wie auf dem Login-Screen.
+    // Kaschiert nebenbei die Übergänge im seitlich gespiegelt erweiterten
+    // Hintergrundbild und sorgt für mehr Kontrast zu den UI-Elementen.
+    layers.add(const Positioned.fill(
+      child: IgnorePointer(
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: RadialGradient(
+              center: Alignment.center,
+              radius: 1.05,
+              colors: [Colors.transparent, Colors.black45],
+            ),
+          ),
+        ),
+      ),
+    ));
 
     // Header: Titel + aktueller Spieler + Countdown + Leave-Button — alles in einer Zeile
     final currentPlayer = ctrl.players.where((p) => p.id == ctrl.currentPlayerId).firstOrNull;
@@ -226,8 +242,10 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
       ),
     ));
 
-    // Karten-Positionen
-    final stackW = cardW * 0.9;
+    // Karten-Positionen — dieselbe Breite wie die Handkarten (siehe
+    // cardWidth weiter unten bei PersistentPlayerHandWidget), damit Deck,
+    // Ablagestapel und Handkarten gleich groß wirken.
+    final stackW = cardW.clamp(24.0, 48.0);
     final deckCenter = Offset(size.width * 0.4, size.height * 0.5);
     final discCenter = Offset(size.width * 0.6, size.height * 0.5);
 
@@ -271,11 +289,15 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
                   builder: (_, __) {
                     return Transform.rotate(
                       angle: _directionCtrl.value * 2 * pi,
-                      child: Icon(
-                        Icons.autorenew,
-                        size: ringSize * 0.6,
-                        color: directionColor,
-                        shadows: const [Shadow(blurRadius: 10, color: Colors.black87)],
+                      child: SizedBox(
+                        width: ringSize * 0.6,
+                        height: ringSize * 0.6,
+                        child: CustomPaint(
+                          painter: _DoubleArrowPainter(
+                            color: directionColor,
+                            strokeWidth: ringSize * 0.6 * 0.09,
+                          ),
+                        ),
                       ),
                     );
                   },
@@ -332,63 +354,53 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
       ),
     ));
 
-    // Ablagestapel
+    // Ablagestapel — gleiche Kartenbreite wie Deck/Handkarten (cardWidth,
+    // Höhe = cardWidth * 1.5), statt der vorherigen festen 150x180px, die
+    // auf den meisten Bildschirmen deutlich größer als Deck/Hand wirkten.
     layers.add(Positioned(
       key: _discardKey,
       left: discCenter.dx - stackW / 2,
       top: discCenter.dy - stackW * 0.6,
-      child: SizedBox(
-        width: stackW,
-        height: stackW * 1.3,
-        child: DragTargetWidget(
-          gameId: widget.gameId,
-          topCard: ctrl.topCardOfDiscardPile,
-          isEnabled: isTurn,
-          currentPlayerId: myId,
-          onCardDropped: (_) async {},
-        ),
+      child: DragTargetWidget(
+        gameId: widget.gameId,
+        topCard: ctrl.topCardOfDiscardPile,
+        isEnabled: isTurn,
+        currentPlayerId: myId,
+        cardWidth: stackW,
+        onCardDropped: (_) async {},
       ),
     ));
 
-    // Gegner-Avatare — feste Leiste im oberen Drittel, weg von Deck/Ablagestapel.
-    // Bei genau einem Gegner bewusst mittig (klassisches 1-gegen-1-Layout).
-    // Ab zwei Gegnern wird die Mitte ausgespart: eine gerade Verteilung über
-    // die volle Breite legt bei ungerader Gegnerzahl sonst genau einen
-    // Gegner auf x=50% — exakt dort, wo der eigene Avatar samt Zug-Ring
-    // sitzt (siehe tableCenter unten), was die beiden Anzeigen übereinander
-    // stapelt. Stattdessen links/rechts der Mitte getrennt verteilen.
+    // Gegner-Avatare — auf einem Bogen über dem Tisch, wie am runden Tisch
+    // sitzend. Bei genau einem Gegner bewusst mittig (klassisches
+    // 1-gegen-1-Layout). Ab zwei Gegnern werden sie entlang eines Halbkreis-
+    // Bogens verteilt: die äußeren sitzen auf gleicher Höhe wie früher, die
+    // mittleren werden nach oben gezogen. Das vermeidet automatisch, dass
+    // bei ungerader Gegnerzahl einer exakt auf x=50% landet — genau dort,
+    // wo der eigene Avatar samt Zug-Ring sitzt (siehe tableCenter unten) —,
+    // weil dieser mittlere Gegner stattdessen am höchsten Punkt des Bogens
+    // sitzt und so am weitesten vom eigenen Avatar entfernt ist.
     final opponents = ctrl.players.where((p) => p.id != myId).toList();
+    // Header-Höhe: edgeM + IconButton (48px) + etwas Abstand
+    const headerBottom = edgeM + 56.0;
+    const minY = headerBottom + 8;
+    final baseY = size.height * 0.30;
+    final arcLift = size.height * 0.15;
     for (var i = 0; i < opponents.length; i++) {
       final double x;
+      final double y;
       if (opponents.length == 1) {
         x = size.width / 2;
+        y = baseY < minY ? minY : baseY;
       } else {
-        const leftBandStart = 0.06;
-        const leftBandEnd = 0.40;
-        const rightBandStart = 0.60;
-        const rightBandEnd = 0.94;
-        final leftCount = (opponents.length / 2).ceil();
-        final rightCount = opponents.length - leftCount;
-        if (i < leftCount) {
-          x = size.width *
-              (leftCount == 1
-                  ? (leftBandStart + leftBandEnd) / 2
-                  : leftBandStart +
-                      (i / (leftCount - 1)) * (leftBandEnd - leftBandStart));
-        } else {
-          final j = i - leftCount;
-          x = size.width *
-              (rightCount == 1
-                  ? (rightBandStart + rightBandEnd) / 2
-                  : rightBandStart +
-                      (j / (rightCount - 1)) *
-                          (rightBandEnd - rightBandStart));
-        }
+        const marginX = 0.08;
+        final t = i / (opponents.length - 1); // 0..1, links nach rechts
+        final theta = pi - t * pi; // pi..0, schwenkt über den Scheitel
+        final radiusX = size.width * (0.5 - marginX);
+        x = size.width * 0.5 + radiusX * cos(theta);
+        final rawY = baseY - arcLift * sin(theta);
+        y = rawY < minY ? minY : rawY;
       }
-      // Header-Höhe: edgeM + IconButton (48px) + etwas Abstand
-      const headerBottom = edgeM + 56.0;
-      final yRaw = size.height * 0.26;
-      final y = yRaw < headerBottom + 8 ? headerBottom + 8 : yRaw;
       final opp = opponents[i];
 
       layers.add(
@@ -553,7 +565,7 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
       child: PersistentPlayerHandWidget(
         gameId: widget.gameId,
         playerId: myId,
-        cardWidth: cardW.clamp(24.0, 48.0),
+        cardWidth: stackW,
         discardKey: _discardKey,
         isMyTurn: isTurn,
         maxVisible: 15,
@@ -701,4 +713,65 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
 
     return Stack(children: layers);
   }
+}
+
+/// Zeichnet zwei kurze, dünne Pfeilbögen (Kreislauf-Symbol) für die
+/// Richtungsanzeige. Ersetzt Icons.autorenew, dessen Pfeilspitzen fest
+/// vorgegeben und vergleichsweise dick sind — hier lässt sich die Dicke von
+/// Strich und Spitze frei über [strokeWidth] steuern.
+class _DoubleArrowPainter extends CustomPainter {
+  final Color color;
+  final double strokeWidth;
+
+  _DoubleArrowPainter({required this.color, required this.strokeWidth});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = size.center(Offset.zero);
+    final radius = size.shortestSide / 2 - strokeWidth;
+    final arcPaint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.round;
+    final headPaint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill;
+
+    final headLen = strokeWidth * 3.0;
+    final headWidth = strokeWidth * 2.2;
+
+    void drawArrow(double startAngle, double sweepAngle) {
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: radius),
+        startAngle,
+        sweepAngle,
+        false,
+        arcPaint,
+      );
+
+      final endAngle = startAngle + sweepAngle;
+      final tip = center + Offset(cos(endAngle), sin(endAngle)) * radius;
+      final travel = endAngle + (sweepAngle > 0 ? pi / 2 : -pi / 2);
+      final dir = Offset(cos(travel), sin(travel));
+      final normal = Offset(-dir.dy, dir.dx);
+      final base = tip - dir * headLen;
+      final p1 = base + normal * (headWidth / 2);
+      final p2 = base - normal * (headWidth / 2);
+
+      final path = Path()
+        ..moveTo(tip.dx, tip.dy)
+        ..lineTo(p1.dx, p1.dy)
+        ..lineTo(p2.dx, p2.dy)
+        ..close();
+      canvas.drawPath(path, headPaint);
+    }
+
+    drawArrow(-pi * 0.12, pi * 0.88);
+    drawArrow(pi * 0.88, pi * 0.88);
+  }
+
+  @override
+  bool shouldRepaint(covariant _DoubleArrowPainter oldDelegate) =>
+      oldDelegate.color != color || oldDelegate.strokeWidth != strokeWidth;
 }
