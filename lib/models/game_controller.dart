@@ -73,12 +73,15 @@ class GameController extends ChangeNotifier {
 
   String? lastReactionId;
 
-  /// Für die öffentliche Reaktions-Animation in der Tischmitte: die zuletzt
-  /// gespielte Reaktionskarte + ein Zähler, der bei jeder neuen Reaktion
+  /// Für die öffentliche Kartenanzeige in der Tischmitte: die zuletzt
+  /// aufgedeckte Aktionskarte + ein Zähler, der bei jeder neuen Karte
   /// hochzählt (für ALLE Spieler, nicht nur den, der reagieren muss).
+  /// Wird direkt am Ablagestapel-Update erkannt (siehe
+  /// _listenForGameUpdates) — deckt damit jede Aktionskarte ab, egal ob sie
+  /// eine Reaktion auslöst oder nicht (z. B. weil niemand kontern kann).
   GameCard? lastReactionCard;
   int reactionFlashSeq = 0;
-  int _lastBroadcastChainLen = 0;
+  int? _lastFlashedCardId;
 
   // Turn-Timeout
   int remainingTime = 10;
@@ -178,6 +181,19 @@ class GameController extends ChangeNotifier {
           <GameCard>[];
 
       _topCardOfDiscardPile = discardPile.isNotEmpty ? discardPile.last : null;
+
+      // Neue Aktionskarte oben auf dem Stapel -> öffentlicher Flash in der
+      // Tischmitte, für alle Spieler. Läuft an JEDER Aktionskarte, nicht
+      // nur an echten Reaktionen — playCard/continueReactionChain schreiben
+      // beide immer zuerst in discardPile, bevor irgendwelche
+      // Reaktions-/Effektlogik greift, das deckt also auch unkonterte
+      // Aktionskarten mit ab.
+      final top = _topCardOfDiscardPile;
+      if (top is ActionCard && top.id != _lastFlashedCardId) {
+        _lastFlashedCardId = top.id;
+        lastReactionCard = top;
+        reactionFlashSeq++;
+      }
 
       // Sync remainingTime from Firebase so non-active players see the countdown
       final myId = FirebaseAuth.instance.currentUser?.uid;
@@ -324,32 +340,11 @@ class GameController extends ChangeNotifier {
         _gameRef.child('reactions').onValue.listen((event) async {
       final data = event.snapshot.value;
 
-      // ---- Öffentliche Reaktions-Animation: läuft für JEDEN Spieler,
-      // nicht nur den, der gerade reagieren muss (der Rest dieser Methode
-      // ist unten weiterhin auf `target == me` beschränkt). ----
-      if (data != null && data is Map) {
-        final rawChain = (data['reactionChain'] as List?) ?? [];
-        if (rawChain.length > _lastBroadcastChainLen) {
-          _lastBroadcastChainLen = rawChain.length;
-          final card = GameCard.fromMap(Map<String, dynamic>.from(rawChain.last as Map));
-          if (card is ActionCard) {
-            lastReactionCard = card;
-            reactionFlashSeq++;
-            notifyListeners();
-          }
-        }
-      } else if (_lastBroadcastChainLen > 0) {
-        // reactions-Knoten wurde gelöscht (Kette zu Ende / Five-O) — die
-        // letzte Karte der Kette liegt inzwischen schon auf dem
-        // Ablagestapel (continueReactionChain schreibt discardPile immer
-        // VOR dem Löschen), also die dort als Abschluss zeigen.
-        if (_topCardOfDiscardPile != null) {
-          lastReactionCard = _topCardOfDiscardPile;
-          reactionFlashSeq++;
-          notifyListeners();
-        }
-        _lastBroadcastChainLen = 0;
-      }
+      // Hinweis: die öffentliche Kartenanzeige in der Tischmitte (siehe
+      // lastReactionCard/reactionFlashSeq) hängt inzwischen direkt am
+      // discardPile-Update in _listenForGameUpdates, nicht mehr hier —
+      // das deckt auch Aktionskarten ab, auf die niemand reagieren kann
+      // (dann entsteht gar kein reactions-Knoten).
 
       if (data == null || data is! Map) return;
 

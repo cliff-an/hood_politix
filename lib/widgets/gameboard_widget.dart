@@ -9,6 +9,7 @@ import '../models/firebase_service.dart';
 import '../models/game_card.dart';
 import '../models/game_controller.dart';
 import '../models/game_meta.dart';
+import '../screens/lobby_screen.dart';
 import 'drag_target_widget.dart';
 import 'persistent_player_hand_widget.dart';
 import 'mic_action_button.dart';
@@ -204,7 +205,19 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
                 onPressed: () async {
                   final navigator = Navigator.of(context);
                   await svc.leaveGame(widget.gameId, myId);
-                  navigator.pop();
+                  // Kein Navigator.pop(): GameScreen wird nur per
+                  // pushReplacement erreicht, der Verlaufsstapel hat also
+                  // keinen vorherigen Eintrag zum Zurückspringen — pop()
+                  // führte hier zu einem weißen Screen. Stattdessen wie
+                  // beim "Zur Lobby"-Button in GameOverScreen direkt zur
+                  // Lobby navigieren.
+                  if (GameController.hasInstance) {
+                    GameController.instance.dispose();
+                  }
+                  navigator.pushAndRemoveUntil(
+                    MaterialPageRoute(builder: (_) => LobbyScreen(userId: myId)),
+                    (_) => false,
+                  );
                 },
               ),
             ],
@@ -260,7 +273,7 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
                       angle: _directionCtrl.value * 2 * pi,
                       child: Icon(
                         Icons.autorenew,
-                        size: ringSize * 0.8,
+                        size: ringSize * 0.6,
                         color: directionColor,
                         shadows: const [Shadow(blurRadius: 10, color: Colors.black87)],
                       ),
