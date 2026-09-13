@@ -350,15 +350,40 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
       ),
     ));
 
-    // Gegner-Avatare — feste Leiste im oberen Drittel, weg von Deck/Ablagestapel
+    // Gegner-Avatare — feste Leiste im oberen Drittel, weg von Deck/Ablagestapel.
+    // Bei genau einem Gegner bewusst mittig (klassisches 1-gegen-1-Layout).
+    // Ab zwei Gegnern wird die Mitte ausgespart: eine gerade Verteilung über
+    // die volle Breite legt bei ungerader Gegnerzahl sonst genau einen
+    // Gegner auf x=50% — exakt dort, wo der eigene Avatar samt Zug-Ring
+    // sitzt (siehe tableCenter unten), was die beiden Anzeigen übereinander
+    // stapelt. Stattdessen links/rechts der Mitte getrennt verteilen.
     final opponents = ctrl.players.where((p) => p.id != myId).toList();
     for (var i = 0; i < opponents.length; i++) {
       final double x;
       if (opponents.length == 1) {
         x = size.width / 2;
       } else {
-        final fraction = i / (opponents.length - 1);
-        x = size.width * 0.12 + fraction * size.width * 0.76;
+        const leftBandStart = 0.06;
+        const leftBandEnd = 0.40;
+        const rightBandStart = 0.60;
+        const rightBandEnd = 0.94;
+        final leftCount = (opponents.length / 2).ceil();
+        final rightCount = opponents.length - leftCount;
+        if (i < leftCount) {
+          x = size.width *
+              (leftCount == 1
+                  ? (leftBandStart + leftBandEnd) / 2
+                  : leftBandStart +
+                      (i / (leftCount - 1)) * (leftBandEnd - leftBandStart));
+        } else {
+          final j = i - leftCount;
+          x = size.width *
+              (rightCount == 1
+                  ? (rightBandStart + rightBandEnd) / 2
+                  : rightBandStart +
+                      (j / (rightCount - 1)) *
+                          (rightBandEnd - rightBandStart));
+        }
       }
       // Header-Höhe: edgeM + IconButton (48px) + etwas Abstand
       const headerBottom = edgeM + 56.0;
