@@ -4,7 +4,9 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../models/card_image_factory.dart';
 import '../models/firebase_service.dart';
+import '../models/game_card.dart';
 import '../models/game_controller.dart';
 import '../models/game_meta.dart';
 import 'drag_target_widget.dart';
@@ -25,9 +27,18 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
   late final AnimationController _popCtrl;
   late final Animation<double> _popAnim;
   late final AnimationController _directionCtrl;
+  late final AnimationController _reactionFlashCtrl;
+  late final Animation<double> _reactionFlashOpacity;
+  late final Animation<double> _reactionFlashScale;
   final GlobalKey _discardKey = GlobalKey();
   int _lastHandCount = 0;
   late Future<GameMeta> _gameMetaFuture;
+
+  // Öffentliche Reaktions-Animation (für alle Spieler sichtbar, nicht nur
+  // den, der reagieren muss) — welche Karte gerade aufblitzt + welchen
+  // reactionFlashSeq-Stand vom GameController wir schon gezeigt haben.
+  GameCard? _flashCard;
+  int _seenReactionFlashSeq = -1;
 
   @override
   void initState() {
@@ -49,6 +60,26 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
       vsync: this,
       duration: const Duration(seconds: 6),
     )..repeat();
+
+    // Reaktionskarte: schnell reinpoppen, kurz halten, ausblenden.
+    _reactionFlashCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1300),
+    );
+    _reactionFlashOpacity = TweenSequence<double>([
+      TweenSequenceItem(tween: Tween(begin: 0.0, end: 1.0), weight: 12),
+      TweenSequenceItem(tween: ConstantTween(1.0), weight: 55),
+      TweenSequenceItem(tween: Tween(begin: 1.0, end: 0.0), weight: 33),
+    ]).animate(_reactionFlashCtrl);
+    _reactionFlashScale = TweenSequence<double>([
+      TweenSequenceItem(
+        tween: Tween(begin: 0.4, end: 1.15)
+            .chain(CurveTween(curve: Curves.easeOutBack)),
+        weight: 30,
+      ),
+      TweenSequenceItem(tween: Tween(begin: 1.15, end: 1.0), weight: 12),
+      TweenSequenceItem(tween: ConstantTween(1.0), weight: 58),
+    ]).animate(_reactionFlashCtrl);
   }
 
   @override
@@ -56,6 +87,7 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
     _pulseCtrl.dispose();
     _popCtrl.dispose();
     _directionCtrl.dispose();
+    _reactionFlashCtrl.dispose();
     super.dispose();
   }
 
@@ -65,6 +97,18 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
     final ctrl = context.watch<GameController>();
     final myId = FirebaseAuth.instance.currentUser!.uid;
     final isTurn = ctrl.currentPlayerId == myId;
+
+    // Neue Reaktionskarte vom Controller gemeldet (für alle Spieler gleich,
+    // nicht nur den, der reagieren musste) -> Flash-Animation anstoßen.
+    if (ctrl.reactionFlashSeq != _seenReactionFlashSeq && ctrl.lastReactionCard != null) {
+      _seenReactionFlashSeq = ctrl.reactionFlashSeq;
+      final card = ctrl.lastReactionCard!;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        setState(() => _flashCard = card);
+        _reactionFlashCtrl.forward(from: 0);
+      });
+    }
     final size = MediaQuery.of(context).size;
 
     final shortestSide = min(size.width, size.height);
@@ -229,6 +273,39 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
         ),
       ),
     ));
+
+    // Reaktionskarte: blitzt kurz groß in der Tischmitte auf — über dem
+    // Richtungspfeil, für alle Spieler gleichzeitig sichtbar, nicht nur in
+    // einem privaten Dialog beim reagierenden Spieler.
+    if (_flashCard != null) {
+      final flashW = stackW * 1.7;
+      layers.add(Positioned(
+        left: tableCenter.dx - flashW / 2,
+        top: tableCenter.dy - flashW * 0.65,
+        child: IgnorePointer(
+          child: AnimatedBuilder(
+            animation: _reactionFlashCtrl,
+            builder: (_, child) => Opacity(
+              opacity: _reactionFlashOpacity.value,
+              child: Transform.scale(scale: _reactionFlashScale.value, child: child),
+            ),
+            child: Container(
+              width: flashW,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                boxShadow: const [
+                  BoxShadow(color: Color(0xFFFFA542), blurRadius: 32, spreadRadius: 4),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: Image.asset(CardImageFactory.getCardImagePath(_flashCard!)),
+              ),
+            ),
+          ),
+        ),
+      ));
+    }
 
     // Deck
     layers.add(Positioned(
@@ -445,41 +522,77 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
       ),
     ));
 
-    // Eigener Avatar mit Pulse, wenn am Zug
-    // Position centres a 80×80 glow area; non-turn avatar (54px) uses same anchor
+    // Eigener Avatar — dieselbe feste Umrandung + Puls wie bei Gegnern
+    // (vorher nur ein schwaches, animationsabhängiges Glühen ohne festen
+    // Ring — dadurch stach der eigene Zug visuell schwächer heraus als der
+    // der Gegner).
+    // Position centres a 84×104 Bereich (Ring + "Am Zug"-Badge darunter);
+    // non-turn avatar (54px) uses same anchor
     layers.add(
       Positioned(
         bottom: edgeM + cardW * 1.5 + 40,
-        left: size.width / 2 - 40,
+        left: size.width / 2 - 42,
         child: isTurn
             ? SizedBox(
-                width: 80,
-                height: 80,
-                child: Stack(
-                  alignment: Alignment.center,
-                  clipBehavior: Clip.none,
+                width: 84,
+                height: 104,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Animated glow ring growing outward from behind the avatar
-                    AnimatedBuilder(
-                      animation: _pulseCtrl,
-                      builder: (_, __) {
-                        final t = _pulseCtrl.value; // 0.0 → 1.0 → 0.0
-                        final d = 54.0 + 26.0 * t;
-                        return Container(
-                          width: d,
-                          height: d,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: Colors.blueAccent
-                                .withValues(alpha: 0.65 - 0.35 * t),
+                    SizedBox(
+                      width: 84,
+                      height: 84,
+                      child: Stack(
+                        alignment: Alignment.center,
+                        clipBehavior: Clip.none,
+                        children: [
+                          // Pulsierendes Glühen als zusätzlicher Blickfang
+                          AnimatedBuilder(
+                            animation: _pulseCtrl,
+                            builder: (_, __) {
+                              final t = _pulseCtrl.value; // 0.0 → 1.0 → 0.0
+                              final d = 58.0 + 22.0 * t;
+                              return Container(
+                                width: d,
+                                height: d,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: Colors.orangeAccent
+                                      .withValues(alpha: 0.55 - 0.30 * t),
+                                ),
+                              );
+                            },
                           ),
-                        );
-                      },
+                          // Feste, immer sichtbare Umrandung (unabhängig von der Animation)
+                          Container(
+                            width: 58,
+                            height: 58,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.orangeAccent, width: 3.5),
+                              boxShadow: const [
+                                BoxShadow(color: Colors.black54, blurRadius: 4),
+                              ],
+                            ),
+                            child: const CircleAvatar(
+                              radius: 27,
+                              backgroundImage: AssetImage('lib/images/man.png'),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                    // Avatar (always on top of glow)
-                    const CircleAvatar(
-                      radius: 27,
-                      backgroundImage: AssetImage('lib/images/man.png'),
+                    Container(
+                      margin: const EdgeInsets.only(top: 2),
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: Colors.orangeAccent,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Text(
+                        'Du bist dran',
+                        style: TextStyle(color: Colors.black, fontSize: 9, fontWeight: FontWeight.bold),
+                      ),
                     ),
                   ],
                 ),
