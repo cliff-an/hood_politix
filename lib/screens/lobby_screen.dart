@@ -10,9 +10,55 @@ import 'game_screen.dart';
 import 'profile_screen.dart';
 import 'rules_screen.dart';
 
-class LobbyScreen extends StatelessWidget {
+class LobbyScreen extends StatefulWidget {
   final String userId;
   const LobbyScreen({super.key, required this.userId});
+
+  @override
+  State<LobbyScreen> createState() => _LobbyScreenState();
+}
+
+class _LobbyScreenState extends State<LobbyScreen> {
+  @override
+  void initState() {
+    super.initState();
+    _maybeStartTutorial();
+  }
+
+  /// Startet das Tutorial automatisch beim allerersten Login — aber nie
+  /// erneut. hasSeenTutorial liefert `true`, wenn der Key fehlt
+  /// (Bestandskonten vor diesem Feature) ODER schon `true` gesetzt wurde,
+  /// beide Fälle lösen hier bewusst nichts aus.
+  Future<void> _maybeStartTutorial() async {
+    // Direkt nach einer Registrierung kann dieser Screen schon gebaut
+    // werden, bevor login_screen.dart den hasSeenTutorial:false-Schreib-
+    // vorgang abgeschickt hat (siehe FirebaseService.pendingRegistration) —
+    // erst darauf warten, sonst würde der Key fälschlich als fehlend (=
+    // "schon gesehen") gelesen. Für normale Logins ist das Future null,
+    // hier entsteht also keine zusätzliche Wartezeit.
+    final pending = FirebaseService.pendingRegistration;
+    if (pending != null) {
+      await pending.future;
+      FirebaseService.pendingRegistration = null;
+    }
+    if (!mounted) return;
+
+    final svc = context.read<FirebaseService>();
+    final alreadySeen = await svc.hasSeenTutorial(widget.userId);
+    if (alreadySeen || !mounted) return;
+
+    await _disposeControllerIfExists();
+    final gameId = await svc.createTutorialGame(widget.userId);
+    if (!mounted) return;
+
+    final controller = GameController.initializeInstance(gameId, svc);
+    await controller.initializeGameIfNeeded();
+    if (!mounted) return;
+
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => GameScreen(gameId: gameId)),
+    );
+  }
 
   /// Falls ein alter GameController aktiv ist → sauber beenden
   Future<void> _disposeControllerIfExists() async {
@@ -30,9 +76,9 @@ class LobbyScreen extends StatelessWidget {
       {String? password}) async {
     final svc = context.read<FirebaseService>();
     await _disposeControllerIfExists();
-    final userName = await svc.getCurrentUserName(userId);
+    final userName = await svc.getCurrentUserName(widget.userId);
 
-    await svc.joinGame(gameId, userId, userName, password: password);
+    await svc.joinGame(gameId, widget.userId, userName, password: password);
 
     // Controller initialisieren
     final controller = GameController.initializeInstance(gameId, svc);
@@ -48,7 +94,7 @@ class LobbyScreen extends StatelessWidget {
   /// Für private Spiele: fragt das Passwort ab, bevor beigetreten wird.
   /// Bereits beigetretene Spieler werden direkt durchgelassen (kein Prompt).
   Future<void> _joinPossiblyPrivate(BuildContext context, GameMeta g) async {
-    if (!g.isPrivate || g.playerIds.contains(userId)) {
+    if (!g.isPrivate || g.playerIds.contains(widget.userId)) {
       await _joinAndNavigate(context, g.id);
       return;
     }
@@ -75,7 +121,7 @@ class LobbyScreen extends StatelessWidget {
   Future<void> _startTrainingGame(BuildContext context, int botCount) async {
     final svc = context.read<FirebaseService>();
     try {
-      final alreadyInGame = await svc.isPlayerAlreadyInGame(userId);
+      final alreadyInGame = await svc.isPlayerAlreadyInGame(widget.userId);
       if (!context.mounted) return;
       if (alreadyInGame) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -86,7 +132,7 @@ class LobbyScreen extends StatelessWidget {
       }
 
       await _disposeControllerIfExists();
-      final gameId = await svc.createTrainingGame(userId, botCount);
+      final gameId = await svc.createTrainingGame(widget.userId, botCount);
       if (!context.mounted) return;
 
       final controller = GameController.initializeInstance(gameId, svc);

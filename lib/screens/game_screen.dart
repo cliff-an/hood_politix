@@ -9,6 +9,7 @@ import '../models/firebase_service.dart';
 import '../models/game_controller.dart';
 import '../widgets/gameboard_widget.dart';
 import '../widgets/start_video_overlay.dart';
+import '../widgets/tutorial_coach_overlay.dart';
 import 'game_over_screen.dart';
 
 class GameScreen extends StatefulWidget {
@@ -24,6 +25,7 @@ class _GameScreenState extends State<GameScreen> {
   bool navigated = false;
   bool showStartVideo = false;
   bool _isFillingBots = false;
+  String? _mode;
 
   @override
   void initState() {
@@ -37,6 +39,14 @@ class _GameScreenState extends State<GameScreen> {
   Future<void> _initialize() async {
     GameController.initializeInstance(widget.gameId, FirebaseService.instance);
     await GameController.instance.initializeGameIfNeeded();
+
+    // mode ändert sich nach dem Erstellen nie mehr -> einmaliger Read statt
+    // eines eigenen dauerhaften Streams.
+    final modeSnap = await FirebaseDatabase.instance
+        .ref('games/${widget.gameId}/meta/mode')
+        .get();
+    _mode = modeSnap.value?.toString();
+
     if (mounted) setState(() => isLoading = false);
   }
 
@@ -200,9 +210,15 @@ class _GameScreenState extends State<GameScreen> {
 
                     // 3️⃣ Spiel läuft normal
                     if (state == 'in progress') {
+                      final board = GameBoard(gameId: widget.gameId);
                       return ChangeNotifierProvider.value(
                         value: GameController.instance,
-                        child: GameBoard(gameId: widget.gameId),
+                        child: _mode == 'tutorial'
+                            ? TutorialCoachOverlay(
+                                gameId: widget.gameId,
+                                child: board,
+                              )
+                            : board,
                       );
                     }
 

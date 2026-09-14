@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:firebase_auth/firebase_auth.dart';
@@ -5,6 +6,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 
 import '../models/avatar_catalog.dart';
+import '../models/firebase_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -103,6 +105,13 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
     final db = FirebaseDatabase.instance.ref();
 
+    // Siehe FirebaseService.pendingRegistration: muss VOR dem Auth-Aufruf
+    // gesetzt sein, da authStateChanges() (und damit AuthGate → LobbyScreen)
+    // schon feuern kann, bevor der hasSeenTutorial-Schreibvorgang unten
+    // überhaupt abgeschickt ist.
+    final registrationDone = Completer<void>();
+    FirebaseService.pendingRegistration = registrationDone;
+
     try {
       // ▶️ 1) Prüfen, ob Username bereits vergeben
       final nameSnap = await db.child('usernames/$username').get();
@@ -128,6 +137,10 @@ class _LoginScreenState extends State<LoginScreen> {
         'username': username,
         'createdAt': ServerValue.timestamp,
         'avatarId': defaultAvatar.id,
+        // Nur NEUE Konten bekommen das Tutorial automatisch angeboten —
+        // fehlt der Key (Bestandskonten vor diesem Feature), gilt das als
+        // "schon gesehen" (siehe FirebaseService.hasSeenTutorial).
+        'hasSeenTutorial': false,
       });
       await db.child('usernames/$username').set(uid);
 
@@ -147,6 +160,7 @@ class _LoginScreenState extends State<LoginScreen> {
         );
       }
     } finally {
+      if (!registrationDone.isCompleted) registrationDone.complete();
       if (mounted) setState(() => _isLoading = false);
     }
   }

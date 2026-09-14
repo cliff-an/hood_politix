@@ -10,19 +10,24 @@ class GameOverScreen extends StatelessWidget {
   final String gameId;
   const GameOverScreen({super.key, required this.gameId});
 
-  /// Lädt Platzierungen der Spieler aus Firebase
-  Future<Map<String, Map<String, dynamic>>> _loadPlacements() async {
-    final snap = await FirebaseDatabase.instance
-        .ref('games/$gameId/placements')
-        .get();
+  /// Lädt Platzierungen + Spielmodus (für den Tutorial-Hinweis) parallel.
+  Future<(Map<String, Map<String, dynamic>>, String)> _loadGameOverData() async {
+    final results = await Future.wait([
+      FirebaseDatabase.instance.ref('games/$gameId/placements').get(),
+      FirebaseDatabase.instance.ref('games/$gameId/meta/mode').get(),
+    ]);
+    final placementsSnap = results[0];
+    final modeSnap = results[1];
 
-    if (!snap.exists || snap.value == null) return {};
+    final placements = <String, Map<String, dynamic>>{};
+    if (placementsSnap.exists && placementsSnap.value != null) {
+      final raw = Map<String, dynamic>.from(placementsSnap.value as Map);
+      raw.forEach((pid, data) {
+        placements[pid] = Map<String, dynamic>.from(data as Map);
+      });
+    }
 
-    final raw = Map<String, dynamic>.from(snap.value as Map);
-    return raw.map(
-      (pid, data) =>
-          MapEntry(pid, Map<String, dynamic>.from(data as Map)),
-    );
+    return (placements, modeSnap.value?.toString() ?? 'normal');
   }
 
   @override
@@ -56,8 +61,8 @@ class GameOverScreen extends StatelessWidget {
             ),
           ),
           SafeArea(
-            child: FutureBuilder<Map<String, Map<String, dynamic>>>(
-              future: _loadPlacements(),
+            child: FutureBuilder<(Map<String, Map<String, dynamic>>, String)>(
+              future: _loadGameOverData(),
               builder: (ctx, snap) {
                 if (snap.connectionState != ConnectionState.done) {
                   return const Center(child: CircularProgressIndicator());
@@ -71,7 +76,8 @@ class GameOverScreen extends StatelessWidget {
                   );
                 }
 
-                final placements = snap.data ?? {};
+                final (placements, mode) =
+                    snap.data ?? (<String, Map<String, dynamic>>{}, 'normal');
                 final sorted = placements.entries
                     .where((e) => e.value.containsKey('finishedAt'))
                     .toList()
@@ -100,6 +106,22 @@ class GameOverScreen extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 24),
+                      ],
+                      if (mode == 'tutorial') ...[
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.black54,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Text(
+                            'Das war das Tutorial! Du kennst jetzt alle Grundlagen — '
+                            'ab hier kannst du mit echten Spielern loslegen.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: Colors.white),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
                       ],
                       Expanded(
                         child: ListView.builder(

@@ -1,5 +1,6 @@
 // ignore_for_file: avoid_print
 
+import 'dart:async';
 import 'dart:math';
 
 import 'package:firebase_auth/firebase_auth.dart';
@@ -402,6 +403,18 @@ Future<List<String>> _loadValidPlayerOrder(String gameId) async {
   }
 
   // --- Tutorial-Flag ------------------------------------------------------
+
+  /// Wird von login_screen.dart während einer laufenden Registrierung
+  /// gesetzt (VOR dem Auth-Aufruf) und nach Abschluss des users/$uid-
+  /// Schreibvorgangs completet. Grund: FirebaseAuth.authStateChanges() kann
+  /// feuern (und damit AuthGate → LobbyScreen auslösen), BEVOR der
+  /// anschließende RTDB-Schreibvorgang mit hasSeenTutorial:false überhaupt
+  /// abgeschickt ist — ein reiner hasSeenTutorial-Read direkt beim Lobby-
+  /// Start würde den Key dann fälschlich als fehlend (= "schon gesehen")
+  /// lesen. LobbyScreen wartet, falls gesetzt, auf dieses Future, bevor es
+  /// den eigentlichen Tutorial-Check macht — für normale Logins (null)
+  /// entsteht dadurch keine zusätzliche Wartezeit.
+  static Completer<void>? pendingRegistration;
 
   Future<bool> hasSeenTutorial(String uid) async {
     final snap = await _database.ref('users/$uid/hasSeenTutorial').get();
@@ -1060,21 +1073,29 @@ Stream<List<GameMeta>> getGamesMetaStream() {
       return;
     }
 
-    // Normal leave: remove player and repair order
-    await Future.wait([
-      playersRef.child(playerId).remove(),
-      stateRef.child('playerOrder').set(order),
-      _database.ref('users/$playerId/currentGameId').remove(),
-    ]);
-
-    // If leaving player was at turn, advance to next
+    // Normal leave: Spieler entfernen + playerOrder reparieren + (falls
+    // nötig) den Zug weiterschalten — als EIN atomarer Mehrpfad-
+    // Schreibvorgang, nicht als separate Future.wait-Aufrufe. Grund: die
+    // $gameId-Schreibfreigabe hängt an players/{auth.uid}.exists(); sobald
+    // players/$playerId separat entfernt wurde, erfüllt der EIGENE Client
+    // diese Bedingung nicht mehr und jeder NACHFOLGENDE Schreibzugriff
+    // (playerOrder, currentPlayerId, ...) schlägt mit PERMISSION_DENIED
+    // fehl. Ein einziges update() wird dagegen als Ganzes gegen den
+    // Zustand VOR dem Schreibvorgang geprüft (players/$playerId existiert
+    // zu dem Zeitpunkt noch) — exakt das Muster, das advanceToNextPlayer
+    // bereits nutzt, um trotz .write:false auf currentPlayerId schreiben
+    // zu können.
+    final updates = <String, Object?>{
+      'players/$playerId': null,
+      'gameState/playerOrder': order,
+    };
     if (currentTurnId == playerId && order.isNotEmpty) {
-      await stateRef.update(_sanitizeUpdateMap({
-        'currentPlayerId': order.first,
-        'turn': ServerValue.increment(1),
-        'remainingTime': 20,
-      }));
+      updates['gameState/currentPlayerId'] = order.first;
+      updates['gameState/turn'] = ServerValue.increment(1);
+      updates['gameState/remainingTime'] = 20;
     }
+    await gameRef.update(_sanitizeUpdateMap(updates));
+    await _database.ref('users/$playerId/currentGameId').remove();
   }
 
   /// Beendet das Spiel weil ein Spieler gegangen ist: schreibt Placements,
