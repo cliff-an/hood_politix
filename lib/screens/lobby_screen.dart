@@ -26,7 +26,8 @@ class LobbyScreen extends StatelessWidget {
   }
 
   /// Spieler tritt einem bestehenden Spiel bei und navigiert weiter
-  Future<void> _joinAndNavigate(BuildContext context, String gameId, {String? password}) async {
+  Future<void> _joinAndNavigate(BuildContext context, String gameId,
+      {String? password}) async {
     final svc = context.read<FirebaseService>();
     await _disposeControllerIfExists();
     final userName = await svc.getCurrentUserName(userId);
@@ -67,6 +68,42 @@ class LobbyScreen extends StatelessWidget {
     }
   }
 
+  /// Startet ein Training (1 Mensch + [botCount] Bots), sofort spielbereit
+  /// ohne Warteraum. Der Ersteller ist bereits durch createTrainingGame
+  /// als Spieler eingetragen — im Unterschied zu _joinAndNavigate wird
+  /// hier also kein zusätzlicher svc.joinGame(...) gebraucht.
+  Future<void> _startTrainingGame(BuildContext context, int botCount) async {
+    final svc = context.read<FirebaseService>();
+    try {
+      final alreadyInGame = await svc.isPlayerAlreadyInGame(userId);
+      if (!context.mounted) return;
+      if (alreadyInGame) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Du bist bereits in einem laufenden Spiel.')),
+        );
+        return;
+      }
+
+      await _disposeControllerIfExists();
+      final gameId = await svc.createTrainingGame(userId, botCount);
+      if (!context.mounted) return;
+
+      final controller = GameController.initializeInstance(gameId, svc);
+      await controller.initializeGameIfNeeded();
+
+      if (!context.mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => GameScreen(gameId: gameId)),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Training konnte nicht gestartet werden: $e')),
+      );
+    }
+  }
+
   /// Löst einen Beitritts-Code auf und tritt bei (fragt Passwort, falls nötig).
   Future<void> _joinByCode(BuildContext context, String code) async {
     final svc = context.read<FirebaseService>();
@@ -98,6 +135,12 @@ class LobbyScreen extends StatelessWidget {
 
     return Scaffold(
       extendBodyBehindAppBar: true,
+      // Die Tastatur gehört einem TextField in einem MODALEN Dialog (Name/
+      // Passwort/Code), nicht dem Lobby-Screen selbst dahinter — ohne dies
+      // versucht der Lobby-Body sich zu verkleinern, wenn die Tastatur
+      // aufklappt, und läuft dabei über (BOTTOM OVERFLOWED), weil die feste
+      // Button-Reihe (Training/Neues Spiel/Code) nicht mitschrumpfen kann.
+      resizeToAvoidBottomInset: false,
       appBar: AppBar(
         title: const Text("Lobby"),
         backgroundColor: Colors.transparent,
@@ -163,12 +206,15 @@ class LobbyScreen extends StatelessWidget {
                     return Column(
                       children: invites.entries.map((entry) {
                         final gameId = entry.key;
-                        final data = Map<String, dynamic>.from(entry.value as Map);
-                        final gameName = data['gameName']?.toString() ?? 'Spiel';
+                        final data =
+                            Map<String, dynamic>.from(entry.value as Map);
+                        final gameName =
+                            data['gameName']?.toString() ?? 'Spiel';
                         final password = data['password']?.toString();
                         return Card(
                           color: Colors.orangeAccent.withValues(alpha: 0.9),
-                          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          margin: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 4),
                           child: ListTile(
                             leading: const Icon(Icons.mail),
                             title: Text('Einladung zu "$gameName"'),
@@ -176,25 +222,32 @@ class LobbyScreen extends StatelessWidget {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 IconButton(
-                                  icon: const Icon(Icons.check, color: Colors.green),
+                                  icon: const Icon(Icons.check,
+                                      color: Colors.green),
                                   tooltip: 'Beitreten',
                                   onPressed: () async {
                                     await svc.declineInvite(userId, gameId);
                                     if (!context.mounted) return;
                                     try {
-                                      await _joinAndNavigate(context, gameId, password: password);
+                                      await _joinAndNavigate(context, gameId,
+                                          password: password);
                                     } catch (e) {
                                       if (!context.mounted) return;
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(content: Text('Beitritt fehlgeschlagen: $e')),
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        SnackBar(
+                                            content: Text(
+                                                'Beitritt fehlgeschlagen: $e')),
                                       );
                                     }
                                   },
                                 ),
                                 IconButton(
-                                  icon: const Icon(Icons.close, color: Colors.red),
+                                  icon: const Icon(Icons.close,
+                                      color: Colors.red),
                                   tooltip: 'Ablehnen',
-                                  onPressed: () => svc.declineInvite(userId, gameId),
+                                  onPressed: () =>
+                                      svc.declineInvite(userId, gameId),
                                 ),
                               ],
                             ),
@@ -206,7 +259,8 @@ class LobbyScreen extends StatelessWidget {
                 ),
                 Expanded(
                   child: StreamBuilder<List<GameMeta>>(
-                    stream: svc.getGamesMetaStream(), // jetzt als Stream-Version
+                    stream:
+                        svc.getGamesMetaStream(), // jetzt als Stream-Version
                     builder: (ctx, snap) {
                       if (snap.connectionState == ConnectionState.waiting) {
                         return const Center(child: CircularProgressIndicator());
@@ -232,9 +286,16 @@ class LobbyScreen extends StatelessWidget {
                                 now - g.endedAt! > endedExpiry) ||
                             now - g.createdAt > createdExpiry;
                         if (isExpired) {
-                          if (g.playerIds.contains(userId)) svc.deleteGame(g.id);
+                          if (g.playerIds.contains(userId)) {
+                            svc.deleteGame(g.id);
+                          }
                           continue;
                         }
+
+                        // Training-/Tutorial-Spiele sind nie öffentlich
+                        // beitretbar — zusätzliche Absicherung neben dem
+                        // ohnehin kurzen Zeitfenster vor startGame.
+                        if (g.mode != 'normal') continue;
 
                         final isFinished =
                             g.endedAt != null || g.state == 'finished';
@@ -282,7 +343,27 @@ class LobbyScreen extends StatelessWidget {
                 // 🔑 Mit Code beitreten
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: _JoinByCodeRow(onJoin: (code) => _joinByCode(context, code)),
+                  child: _JoinByCodeRow(
+                      onJoin: (code) => _joinByCode(context, code)),
+                ),
+
+                // 🤖 Trainingsmodus — bewusst optisch sekundär (Outline),
+                // kein gleichwertiger Hauptmodus, sondern Übung ohne
+                // Mitspieler.
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: OutlinedButton(
+                    onPressed: () async {
+                      final botCount = await showDialog<int>(
+                        context: context,
+                        builder: (_) => const _TrainingBotCountDialog(),
+                      );
+                      if (botCount == null) return;
+                      if (!context.mounted) return;
+                      await _startTrainingGame(context, botCount);
+                    },
+                    child: const Text('🤖 Gegen Computer (Training)'),
+                  ),
                 ),
 
                 // ➕ Neues Spiel erstellen
@@ -314,6 +395,7 @@ class LobbyScreen extends StatelessWidget {
                           result.name.trim(),
                           userId,
                           password: result.password,
+                          targetPlayerCount: result.targetPlayerCount,
                         );
                         if (!context.mounted) return;
                         await _joinAndNavigate(context, newGameId);
@@ -385,7 +467,8 @@ class _JoinByCodeRowState extends State<_JoinByCodeRow> {
 class _NewGameResult {
   final String name;
   final String? password;
-  const _NewGameResult(this.name, this.password);
+  final int targetPlayerCount;
+  const _NewGameResult(this.name, this.password, this.targetPlayerCount);
 }
 
 /// Dialog zur Eingabe des neuen Spielnamens, optional mit Passwortschutz
@@ -400,6 +483,7 @@ class _NewGameNameDialogState extends State<_NewGameNameDialog> {
   final _nameCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
   bool _isPrivate = false;
+  int _targetPlayerCount = 4;
 
   @override
   void dispose() {
@@ -412,26 +496,42 @@ class _NewGameNameDialogState extends State<_NewGameNameDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: const Text('Name für neues Spiel'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextField(
-            controller: _nameCtrl,
-            decoration: const InputDecoration(hintText: 'z.B. Freitagabend'),
-          ),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Privates Spiel'),
-            value: _isPrivate,
-            onChanged: (v) => setState(() => _isPrivate = v),
-          ),
-          if (_isPrivate)
+      // Lässt den Inhalt notfalls scrollen statt zu überlaufen, wenn wenig
+      // vertikaler Platz bleibt (z. B. sehr kleine Bildschirme).
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
             TextField(
-              controller: _passwordCtrl,
-              obscureText: true,
-              decoration: const InputDecoration(labelText: 'Passwort'),
+              controller: _nameCtrl,
+              decoration: const InputDecoration(hintText: 'z.B. Freitagabend'),
             ),
-        ],
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Privates Spiel'),
+              value: _isPrivate,
+              onChanged: (v) => setState(() => _isPrivate = v),
+            ),
+            if (_isPrivate)
+              TextField(
+                controller: _passwordCtrl,
+                obscureText: true,
+                decoration: const InputDecoration(labelText: 'Passwort'),
+              ),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text('Ziel-Spieleranzahl: $_targetPlayerCount'),
+            ),
+            Slider(
+              value: _targetPlayerCount.toDouble(),
+              min: 2,
+              max: 6,
+              divisions: 4,
+              label: '$_targetPlayerCount',
+              onChanged: (v) => setState(() => _targetPlayerCount = v.round()),
+            ),
+          ],
+        ),
       ),
       actions: [
         TextButton(
@@ -442,9 +542,57 @@ class _NewGameNameDialogState extends State<_NewGameNameDialog> {
           onPressed: () {
             final password = _isPrivate ? _passwordCtrl.text.trim() : null;
             if (_isPrivate && (password == null || password.isEmpty)) return;
-            Navigator.pop(context, _NewGameResult(_nameCtrl.text.trim(), password));
+            Navigator.pop(
+              context,
+              _NewGameResult(
+                  _nameCtrl.text.trim(), password, _targetPlayerCount),
+            );
           },
           child: const Text('Erstellen'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Wählt die Bot-Anzahl (1-5) für den Trainingsmodus.
+class _TrainingBotCountDialog extends StatefulWidget {
+  const _TrainingBotCountDialog();
+
+  @override
+  State<_TrainingBotCountDialog> createState() =>
+      _TrainingBotCountDialogState();
+}
+
+class _TrainingBotCountDialogState extends State<_TrainingBotCountDialog> {
+  int _botCount = 3;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Gegen Computer üben'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('$_botCount Bot${_botCount == 1 ? '' : 's'}'),
+          Slider(
+            value: _botCount.toDouble(),
+            min: 1,
+            max: 5,
+            divisions: 4,
+            label: '$_botCount',
+            onChanged: (v) => setState(() => _botCount = v.round()),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, null),
+          child: const Text('Abbrechen'),
+        ),
+        ElevatedButton(
+          onPressed: () => Navigator.pop(context, _botCount),
+          child: const Text('Training starten'),
         ),
       ],
     );

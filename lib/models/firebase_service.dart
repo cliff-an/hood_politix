@@ -9,6 +9,7 @@ import 'package:hp_card_game/models/game_meta.dart';
 import 'package:collection/collection.dart';
 
 import '/models/avatar_catalog.dart';
+import '/models/bot_engine.dart';
 import '/models/game_controller.dart';
 import '/models/number_card.dart';
 import '/models/player.dart';
@@ -218,7 +219,18 @@ Future<List<String>> _loadValidPlayerOrder(String gameId) async {
 }
 
 
-  Future<String> createNewGame(String gameName, String userId, {String? password}) async {
+  Future<String> createNewGame(
+    String gameName,
+    String userId, {
+    String? password,
+    // 'normal' | 'training' | 'tutorial' — training/tutorial-Spiele werden
+    // aus der öffentlichen Lobby-Liste rausgefiltert und starten direkt
+    // ohne Warteraum (siehe createTrainingGame/createTutorialGame).
+    String mode = 'normal',
+    // Nur bei normalen Spielen gesetzt: Ziel-Spieleranzahl, die der
+    // Warteraum für die optionale "Mit N Bots starten"-Anzeige braucht.
+    int? targetPlayerCount,
+  }) async {
   try {
     final userName = await _fetchUserName(userId);
     final avatarUrl = resolveAvatarPath(await _fetchAvatarId(userId));
@@ -238,6 +250,8 @@ Future<List<String>> _loadValidPlayerOrder(String gameId) async {
       'meta': {
         'name': gameName, // 🔹 Spielname speichern
         'isPrivate': isPrivate,
+        'mode': mode,
+        if (targetPlayerCount != null) 'targetPlayerCount': targetPlayerCount,
       },
       'players': {
         userId: {'name': userName, 'handCardIds': [], 'avatarUrl': avatarUrl},
@@ -273,7 +287,17 @@ Future<List<String>> _loadValidPlayerOrder(String gameId) async {
 }
 
 
-  Future<void> startGame(String gameId, String starterUserId) async {
+  // starterUserId wird aktuell nicht gelesen — wer beginnt, wird immer
+  // zufällig aus den vorhandenen Spielern gewählt (siehe playerIds.shuffle
+  // unten). Parameter bleibt aus Kompatibilitätsgründen erhalten.
+  Future<void> startGame(
+    String gameId,
+    String starterUserId, {
+    // Für das Tutorial: liefert ein leicht vorbereitetes statt komplett
+    // zufälliges Deck (siehe Deck.shuffledWithActionBias). Normale Spiele
+    // und der Trainingsmodus nutzen den Default unverändert.
+    Deck Function()? deckFactory,
+  }) async {
     final gameRef = _database.ref('games/$gameId');
     final playersRef = gameRef.child("players");
 
@@ -290,7 +314,7 @@ Future<List<String>> _loadValidPlayerOrder(String gameId) async {
     final currentPlayerId = playerIds.first;
 
     // Deck aufbauen & mischen
-    final deck = Deck()..shuffle();
+    final deck = deckFactory != null ? deckFactory() : (Deck()..shuffle());
 
     // Single batch update — replaces 20+ sequential writes
     final batch = <String, dynamic>{};
@@ -317,6 +341,78 @@ Future<List<String>> _loadValidPlayerOrder(String gameId) async {
     batch['gameState/playerOrder'] = playerIds;
 
     await gameRef.update(batch);
+  }
+
+  // --- Bots -------------------------------------------------------------
+
+  /// Fügt [count] Bot-Spieler hinzu (gleiche Knotenform wie ein Mensch,
+  /// zusätzlich isBot:true). IDs sind bot_$startIndex .. bot_$(startIndex+count-1)
+  /// und nur innerhalb dieses Spiels eindeutig.
+  Future<void> addBotPlayers(String gameId, int count, {int startIndex = 0}) async {
+    if (count <= 0) return;
+    final batch = <String, dynamic>{};
+    for (var i = 0; i < count; i++) {
+      final idx = startIndex + i;
+      batch['players/bot_$idx'] = {
+        'name': BotCatalog.nameFor(idx),
+        'handCardIds': [],
+        'avatarUrl': BotCatalog.avatarPathFor(idx),
+        'isBot': true,
+      };
+    }
+    await _database.ref('games/$gameId').update(batch);
+  }
+
+  /// Trainingsmodus: 1 Mensch + [botCount] Bots, startet sofort (kein
+  /// Warteraum) mit normalem Zufallsdeck.
+  Future<String> createTrainingGame(String userId, int botCount) async {
+    final gameId = await createNewGame('Training', userId, mode: 'training');
+    await addBotPlayers(gameId, botCount);
+    await startGame(gameId, userId);
+    return gameId;
+  }
+
+  /// Tutorial: 1 Mensch + 3 Bots, startet sofort mit leicht vorbereitetem
+  /// Deck (mehr Aktionskarten früh im Stapel, siehe Deck.shuffledWithActionBias).
+  Future<String> createTutorialGame(String userId) async {
+    final gameId = await createNewGame('Tutorial', userId, mode: 'tutorial');
+    await addBotPlayers(gameId, 3);
+    await startGame(gameId, userId, deckFactory: Deck.shuffledWithActionBias);
+    return gameId;
+  }
+
+  /// Füllt ein wartendes normales Spiel mit Bots bis zur Ziel-Spieleranzahl
+  /// auf. Liest die aktuelle Spielerzahl neu (idempotent gegen Doppel-Tap
+  /// oder zwei Clients, die gleichzeitig auf den Button tippen).
+  Future<void> fillWithBots(String gameId, int targetPlayerCount) async {
+    final snap = await _database.ref('games/$gameId/players').get();
+    final current = snap.exists && snap.value is Map
+        ? Map<String, dynamic>.from(snap.value as Map)
+        : <String, dynamic>{};
+    final needed = targetPlayerCount - current.length;
+    if (needed <= 0) return;
+    final existingBotIndices = current.keys
+        .where((k) => k.startsWith('bot_'))
+        .map((k) => int.tryParse(k.substring(4)) ?? -1)
+        .toList();
+    final nextIndex = existingBotIndices.isEmpty
+        ? 0
+        : (existingBotIndices.reduce((a, b) => a > b ? a : b) + 1);
+    await addBotPlayers(gameId, needed, startIndex: nextIndex);
+  }
+
+  // --- Tutorial-Flag ------------------------------------------------------
+
+  Future<bool> hasSeenTutorial(String uid) async {
+    final snap = await _database.ref('users/$uid/hasSeenTutorial').get();
+    // Fehlender Key (Bestandskonto vor diesem Feature) zählt als "schon
+    // gesehen" — nie rückwirkend aufzwingen.
+    if (!snap.exists) return true;
+    return snap.value == true;
+  }
+
+  Future<void> markTutorialSeen(String uid) {
+    return _database.ref('users/$uid/hasSeenTutorial').set(true);
   }
 
   Future<String> getCurrentPlayerId(String gameId) async {
@@ -513,6 +609,7 @@ Future<List<String>> _loadValidPlayerOrder(String gameId) async {
     final nameMap = {for (final p in players) p.id: p.name};
     final avatarMap = {for (final p in players) p.id: p.avatarUrl};
 
+    final isBotMap = {for (final p in players) p.id: p.isBot};
     final placements = <String, dynamic>{};
     if (finishedSnap.exists && finishedSnap.value is Map) {
       final finishedData = Map<String, dynamic>.from(finishedSnap.value as Map);
@@ -522,6 +619,7 @@ Future<List<String>> _loadValidPlayerOrder(String gameId) async {
           'name': nameMap[pid] ?? 'Unbekannter Spieler',
           'avatarUrl': avatarMap[pid] ?? '',
           'finishedAt': ft, // int (ms since epoch) from ServerValue.timestamp
+          'isBot': isBotMap[pid] ?? false,
         };
       });
     }
@@ -990,6 +1088,7 @@ Stream<List<GameMeta>> getGamesMetaStream() {
     final players = await fetchPlayers(gameId); // leaving player still in /players
     final nameMap   = {for (final p in players) p.id: p.name};
     final avatarMap = {for (final p in players) p.id: p.avatarUrl};
+    final isBotMap  = {for (final p in players) p.id: p.isBot};
 
     final now = DateTime.now().millisecondsSinceEpoch;
     final batch = <String, dynamic>{};
@@ -1005,6 +1104,7 @@ Stream<List<GameMeta>> getGamesMetaStream() {
         'name':       nameMap[pid]   ?? 'Unbekannter Spieler',
         'avatarUrl':  avatarMap[pid] ?? 'lib/images/man.png',
         'finishedAt': ts,
+        'isBot':      isBotMap[pid]  ?? false,
       };
     }
 
@@ -1017,6 +1117,7 @@ Stream<List<GameMeta>> getGamesMetaStream() {
       'name':       nameMap[leavingPlayerId]   ?? 'Unbekannter Spieler',
       'avatarUrl':  avatarMap[leavingPlayerId] ?? 'lib/images/man.png',
       'finishedAt': leavingTs,
+      'isBot':      isBotMap[leavingPlayerId]  ?? false,
     };
 
     batch['gameState/state']           = 'finished';
@@ -1486,8 +1587,16 @@ Future<void> advanceToNextPlayer(String gameId) async {
     BuildContext context,
     String gameId,
     String playerId,
-    GameCard card,
-  ) async {
+    GameCard card, {
+    // Für Bot-Züge: ersetzt den Ziel-Auswahl- bzw. Tausch/Aufdecken-Dialog,
+    // der sonst über GameController.instance auf dem BuildContext geöffnet
+    // würde — ein Bot-Zug darf nie einen Dialog auf einem fremden
+    // Bildschirm öffnen. Menschliche Aufrufer übergeben nichts, dann läuft
+    // es exakt wie bisher über die Dialoge.
+    Future<String?> Function()? resolveTarget,
+    Future<void> Function(String source, String target, ActionCard card)?
+        resolveSnitchChoice,
+  }) async {
     final gameRef = _database.ref('games/$gameId');
     final discardRef = gameRef.child('gameState/discardPile');
     final playerRef = gameRef.child('players/$playerId/handCardIds');
@@ -1533,7 +1642,7 @@ Future<void> advanceToNextPlayer(String gameId) async {
     });
 
     // Mic-Check VOR Status: verhindert Strafkarten nach bereits gesetztem 'finished'
-    final isDone = await _handleMicChecksAndDrop(gameId, playerId);
+    final isDone = await handleMicChecksAndDrop(gameId, playerId);
     if (isDone) await updateGameStatus(gameId);
 
     // Zahlenkarte → nächster Spieler
@@ -1546,8 +1655,13 @@ Future<void> advanceToNextPlayer(String gameId) async {
 
     // Deal/Snitch haben Sonderziel (wird im Controller per Dialog gewählt)
     if (action.actionType == ActionType.deal || action.actionType == ActionType.snitch) {
-      // ignore: use_build_context_synchronously
-      final target = await GameController.instance.selectTargetPlayer(context, gameId, playerId);
+      final String? target;
+      if (resolveTarget != null) {
+        target = await resolveTarget();
+      } else {
+        // ignore: use_build_context_synchronously
+        target = await GameController.instance.selectTargetPlayer(context, gameId, playerId);
+      }
       if (target == null || target == playerId) {
         await nextTurn(gameId);
         return;
@@ -1561,13 +1675,17 @@ Future<void> advanceToNextPlayer(String gameId) async {
 
       if (action.actionType == ActionType.snitch) {
         // Show swap/reveal dialog directly on source device; performSnitchAction handles turn advancement
-        await GameController.instance.performSnitchAction(gameId, playerId, target, action);
+        if (resolveSnitchChoice != null) {
+          await resolveSnitchChoice(playerId, target, action);
+        } else {
+          await GameController.instance.performSnitchAction(gameId, playerId, target, action);
+        }
         return;
       }
 
       // ignore: use_build_context_synchronously
       await handleActionCardEffect(context, action, gameId, playerId, target);
-      final isDoneAfterAction = await _handleMicChecksAndDrop(gameId, playerId);
+      final isDoneAfterAction = await handleMicChecksAndDrop(gameId, playerId);
       if (isDoneAfterAction) await updateGameStatus(gameId);
       return;
     }
@@ -1608,7 +1726,7 @@ Future<void> advanceToNextPlayer(String gameId) async {
     }
   }
 
-  Future<bool> _handleMicChecksAndDrop(String gameId, String playerId) async {
+  Future<bool> handleMicChecksAndDrop(String gameId, String playerId) async {
     final hand = await getPlayerCards(gameId, playerId);
     final count = hand.length;
 

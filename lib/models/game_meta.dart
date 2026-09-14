@@ -8,6 +8,14 @@ class GameMeta {
   final bool isPrivate;
   final String? joinCode;
 
+  /// 'normal' | 'training' | 'tutorial' — training/tutorial-Spiele werden
+  /// aus der öffentlichen Lobby-Liste rausgefiltert.
+  final String mode;
+
+  /// Nur bei normalen Spielen gesetzt: Ziel-Spieleranzahl für die
+  /// "X/Y Spieler" + "Mit N Bots starten"-Anzeige im Warteraum.
+  final int? targetPlayerCount;
+
   GameMeta({
     required this.id,
     required this.name,
@@ -17,6 +25,8 @@ class GameMeta {
     required this.state, // ✅ HINZUGEFÜGT
     this.isPrivate = false,
     this.joinCode,
+    this.mode = 'normal',
+    this.targetPlayerCount,
   });
 
   factory GameMeta.fromMap(String id, Map<String, dynamic> data) {
@@ -42,6 +52,8 @@ class GameMeta {
       state: state,
       isPrivate: metaMap['isPrivate'] == true,
       joinCode: metaMap['joinCode']?.toString(),
+      mode: metaMap['mode']?.toString() ?? 'normal',
+      targetPlayerCount: (metaMap['targetPlayerCount'] as num?)?.toInt(),
     );
   }
 }

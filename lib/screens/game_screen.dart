@@ -23,6 +23,7 @@ class _GameScreenState extends State<GameScreen> {
   bool isLoading = true;
   bool navigated = false;
   bool showStartVideo = false;
+  bool _isFillingBots = false;
 
   @override
   void initState() {
@@ -98,6 +99,20 @@ class _GameScreenState extends State<GameScreen> {
     final shuffled = [...players]..shuffle();
     final startPlayer = shuffled.first;
     await FirebaseService.instance.startGame(widget.gameId, startPlayer.id);
+  }
+
+  /// Füllt den Warteraum bis zur in meta/targetPlayerCount hinterlegten
+  /// Ziel-Spieleranzahl mit Bots auf. fillWithBots ist selbst idempotent
+  /// (liest die aktuelle Spielerzahl neu) — der Guard hier verhindert nur
+  /// unnötige Doppel-Aufrufe durch schnelles Doppel-Tippen.
+  Future<void> _fillWithBots(int targetPlayerCount) async {
+    if (_isFillingBots) return;
+    setState(() => _isFillingBots = true);
+    try {
+      await FirebaseService.instance.fillWithBots(widget.gameId, targetPlayerCount);
+    } finally {
+      if (mounted) setState(() => _isFillingBots = false);
+    }
   }
 
   /// Teilt den Beitritts-Code dieses Spiels über die native Share-Sheet.
@@ -195,49 +210,112 @@ class _GameScreenState extends State<GameScreen> {
                     final names = playersMap.values
                         .map((v) => (v as Map)['name'] as String? ?? '—')
                         .toList();
+                    final isBotFlags = playersMap.values
+                        .map((v) => (v as Map)['isBot'] == true)
+                        .toList();
+                    final humanCount =
+                        isBotFlags.where((isBot) => !isBot).length;
                     final canStart = names.length >= 2;
 
-                    return Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Text("Warte auf Spielstart…",
-                              style: TextStyle(fontSize: 16)),
-                          const SizedBox(height: 12),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 4,
-                            alignment: WrapAlignment.center,
-                            children:
-                                names.map((n) => Chip(label: Text(n))).toList(),
-                          ),
-                          const SizedBox(height: 16),
-                          Wrap(
-                            spacing: 8,
-                            alignment: WrapAlignment.center,
+                    return StreamBuilder<DatabaseEvent>(
+                      stream: FirebaseDatabase.instance
+                          .ref('games/${widget.gameId}/meta')
+                          .onValue,
+                      builder: (ctx3, metaSnap) {
+                        final metaRaw = metaSnap.data?.snapshot.value;
+                        final metaMap = (metaRaw is Map)
+                            ? metaRaw.cast<String, dynamic>()
+                            : <String, dynamic>{};
+                        final mode = metaMap['mode']?.toString() ?? 'normal';
+                        final targetPlayerCount =
+                            (metaMap['targetPlayerCount'] as num?)?.toInt();
+
+                        // Bot-Auffüllen nur für normale Spiele mit gesetztem
+                        // Ziel, solange noch Platz ist — und erst ab 2
+                        // echten Menschen (der Block fehlt komplett, nicht
+                        // nur deaktiviert, solange nur 1 Mensch da ist).
+                        final showBotFill = mode == 'normal' &&
+                            targetPlayerCount != null &&
+                            playersMap.length < targetPlayerCount &&
+                            humanCount >= 2;
+                        final botsNeeded = targetPlayerCount != null
+                            ? targetPlayerCount - playersMap.length
+                            : 0;
+
+                        return Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
                             children: [
-                              OutlinedButton.icon(
-                                icon: const Icon(Icons.person_add),
-                                label: const Text('Freund einladen'),
-                                onPressed: () => showDialog(
-                                  context: context,
-                                  builder: (_) => _InviteFriendDialog(gameId: widget.gameId),
-                                ),
+                              const Text("Warte auf Spielstart…",
+                                  style: TextStyle(fontSize: 16)),
+                              const SizedBox(height: 12),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 4,
+                                alignment: WrapAlignment.center,
+                                children: List.generate(names.length, (i) {
+                                  return Chip(
+                                    avatar:
+                                        isBotFlags[i] ? const Text('🤖') : null,
+                                    label: Text(names[i]),
+                                  );
+                                }),
                               ),
-                              OutlinedButton.icon(
-                                icon: const Icon(Icons.share),
-                                label: const Text('Code teilen'),
-                                onPressed: () => _shareJoinCode(widget.gameId),
+                              if (showBotFill) ...[
+                                const SizedBox(height: 16),
+                                Text(
+                                  '👥 $humanCount/$targetPlayerCount Spieler',
+                                  style: const TextStyle(fontSize: 14),
+                                ),
+                                const SizedBox(height: 8),
+                                Wrap(
+                                  spacing: 8,
+                                  alignment: WrapAlignment.center,
+                                  children: [
+                                    const OutlinedButton(
+                                      onPressed: null,
+                                      child: Text('Auf echte Spieler warten'),
+                                    ),
+                                    ElevatedButton(
+                                      onPressed: _isFillingBots
+                                          ? null
+                                          : () => _fillWithBots(targetPlayerCount),
+                                      child: Text(
+                                          'Mit $botsNeeded Bots starten'),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                              const SizedBox(height: 16),
+                              Wrap(
+                                spacing: 8,
+                                alignment: WrapAlignment.center,
+                                children: [
+                                  OutlinedButton.icon(
+                                    icon: const Icon(Icons.person_add),
+                                    label: const Text('Freund einladen'),
+                                    onPressed: () => showDialog(
+                                      context: context,
+                                      builder: (_) =>
+                                          _InviteFriendDialog(gameId: widget.gameId),
+                                    ),
+                                  ),
+                                  OutlinedButton.icon(
+                                    icon: const Icon(Icons.share),
+                                    label: const Text('Code teilen'),
+                                    onPressed: () => _shareJoinCode(widget.gameId),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              ElevatedButton(
+                                onPressed: canStart ? _tryStartGame : null,
+                                child: Text('Spiel starten (${names.length})'),
                               ),
                             ],
                           ),
-                          const SizedBox(height: 12),
-                          ElevatedButton(
-                            onPressed: canStart ? _tryStartGame : null,
-                            child: Text('Spiel starten (${names.length})'),
-                          ),
-                        ],
-                      ),
+                        );
+                      },
                     );
                   },
                 );

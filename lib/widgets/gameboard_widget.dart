@@ -595,13 +595,30 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
                               backgroundImage: AssetImage(ctrl.playerAvatar(opp.id)),
                             ),
                           ),
+                          if (opp.isBot)
+                            const Positioned(
+                              right: 2,
+                              bottom: 2,
+                              child: Text('🤖', style: TextStyle(fontSize: 14)),
+                            ),
                         ],
                       ),
                     )
                   else
-                    CircleAvatar(
-                      radius: 20,
-                      backgroundImage: AssetImage(ctrl.playerAvatar(opp.id)),
+                    Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        CircleAvatar(
+                          radius: 20,
+                          backgroundImage: AssetImage(ctrl.playerAvatar(opp.id)),
+                        ),
+                        if (opp.isBot)
+                          const Positioned(
+                            right: -2,
+                            bottom: -2,
+                            child: Text('🤖', style: TextStyle(fontSize: 14)),
+                          ),
+                      ],
                     ),
                   Text(
                     opp.name,

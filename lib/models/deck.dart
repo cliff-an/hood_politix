@@ -15,6 +15,44 @@ class Deck {
  Deck.empty();
   List<GameCard> get cards => _cards;
 
+  /// Wie ein normales, zufällig gemischtes Deck — nur dass sichergestellt
+  /// wird, dass unter den obersten [topWindow] Karten (deckt die
+  /// Start-Hände + die ersten paar Zieh-Aktionen ab; Karten werden vom
+  /// Ende der Liste gezogen, s. [draw]) mindestens [minActionCards]
+  /// Aktionskarten liegen. Für den Tutorial-Modus, damit Aktionskarten
+  /// früh im Spiel auftauchen, ohne eine feste Kartenreihenfolge
+  /// vorzuschreiben — der Rest bleibt komplett zufällig.
+  factory Deck.shuffledWithActionBias({int topWindow = 28, int minActionCards = 10}) {
+    final deck = Deck();
+    final cards = deck._cards;
+    final n = cards.length;
+    final windowStart = (n - topWindow).clamp(0, n);
+    final rng = Random();
+
+    int countActionInWindow() =>
+        cards.sublist(windowStart).whereType<ActionCard>().length;
+
+    while (countActionInWindow() < minActionCards) {
+      final actionIndicesBeforeWindow = [
+        for (var i = 0; i < windowStart; i++)
+          if (cards[i] is ActionCard) i,
+      ];
+      final numberIndicesInWindow = [
+        for (var i = windowStart; i < n; i++)
+          if (cards[i] is NumberCard) i,
+      ];
+      if (actionIndicesBeforeWindow.isEmpty || numberIndicesInWindow.isEmpty) {
+        break; // nicht genug Material zum Tauschen — bleibt einfach zufällig
+      }
+      final fromIdx = actionIndicesBeforeWindow[rng.nextInt(actionIndicesBeforeWindow.length)];
+      final toIdx = numberIndicesInWindow[rng.nextInt(numberIndicesInWindow.length)];
+      final tmp = cards[fromIdx];
+      cards[fromIdx] = cards[toIdx];
+      cards[toIdx] = tmp;
+    }
+    return deck;
+  }
+
   void initializeDeck() {
     _cards.clear(); // Sicherstellen, dass das Deck zu Beginn leer ist
     int id = 1; // Eindeutige ID für jede Karte

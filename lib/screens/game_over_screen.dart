@@ -110,6 +110,7 @@ class GameOverScreen extends StatelessWidget {
                                 data['name'] ?? 'Unbekannter Spieler';
                             final avatar =
                                 data['avatarUrl'] ?? 'lib/images/man.png';
+                            final isBot = data['isBot'] == true;
                             return Card(
                               color: Colors.black.withValues(alpha: 0.5),
                               child: ListTile(
@@ -124,6 +125,7 @@ class GameOverScreen extends StatelessWidget {
                                     fontWeight: FontWeight.bold,
                                   ),
                                 ),
+                                trailing: isBot ? const Text('🤖') : null,
                               ),
                             );
                           },

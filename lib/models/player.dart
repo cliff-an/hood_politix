@@ -20,6 +20,9 @@ class Player {
   /// Zeitpunkt, wann der Spieler fertig wurde.
   final DateTime? finishedAt;
 
+  /// Ob dieser Spieler ein Bot ist (siehe lib/models/bot_engine.dart).
+  final bool isBot;
+
   Player({
     required this.id,
     required this.name,
@@ -27,6 +30,7 @@ class Player {
     this.avatarUrl = '',
     this.hasWon = false,
     this.finishedAt,
+    this.isBot = false,
   });
 
   // ---------------------------------------------------------------------------
@@ -66,6 +70,7 @@ class Player {
       'avatarUrl': avatarUrl,
       'hasWon': hasWon,
       'finishedAt': finishedAt?.toIso8601String(),
+      'isBot': isBot,
     };
   }
 
@@ -96,6 +101,7 @@ class Player {
       avatarUrl: map['avatarUrl'] as String? ?? '',
       hasWon: map['hasWon'] == true,
       finishedAt: finishedAt,
+      isBot: map['isBot'] == true,
     );
   }
 }

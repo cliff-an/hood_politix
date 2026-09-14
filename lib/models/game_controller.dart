@@ -8,6 +8,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
 
+import 'bot_game_driver.dart';
 import 'firebase_service.dart';
 import 'game_card.dart';
 import 'player.dart';
@@ -64,6 +65,7 @@ class GameController extends ChangeNotifier {
 
   GameCard? _topCardOfDiscardPile;
   String? currentPlayerId;
+  int turn = 0;
 
   bool isClockwise = true;
   List<String> playerOrder = [];
@@ -104,6 +106,8 @@ class GameController extends ChangeNotifier {
   StreamSubscription<DatabaseEvent>? _playerOrderSubscription;
   StreamSubscription<DatabaseEvent>? _reactionSubscription;
 
+  BotGameDriver? _botDriver;
+
   // -------- Lifecycle --------
   GameController._internal(this.gameId, this.firebaseService)
       : _gameRef = FirebaseDatabase.instance.ref('games/$gameId');
@@ -125,6 +129,10 @@ class GameController extends ChangeNotifier {
     _listenForSnitchAction();      // snitchAction (Swap/Reveal)
     _listenForFirstTurnFlag();      // hasFirstTurnStarted
     Future.microtask(_listenForReactions); // Reaktionsknoten
+
+    // Immer aktiv, nicht nur wenn Bots im Spiel sind — dann braucht
+    // fillWithBots() mitten im Spiel keine zusätzliche Verdrahtung.
+    _botDriver = BotGameDriver(gameId, this, firebaseService)..start();
   }
 
   // -------- Public Getters --------
@@ -179,6 +187,7 @@ class GameController extends ChangeNotifier {
 
       final data = Map<String, dynamic>.from(raw);
       isClockwise = (data["isClockwise"] ?? true) == true;
+      turn = (data["turn"] as num?)?.toInt() ?? turn;
       playerOrder = List<String>.from(
         (data["playerOrder"] as List?)?.map((e) => e.toString()) ?? const [],
       );
@@ -683,6 +692,7 @@ class GameController extends ChangeNotifier {
     _snitchRevealSubscription?.cancel();
     _playerOrderSubscription?.cancel();
     _reactionSubscription?.cancel();
+    _botDriver?.dispose();
 
     _cancelTurnTimerInternal();
 
