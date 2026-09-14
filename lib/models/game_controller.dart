@@ -83,6 +83,13 @@ class GameController extends ChangeNotifier {
   int reactionFlashSeq = 0;
   int? _lastFlashedCardId;
 
+  /// Emoji-Reaktion eines Spielers (nur feste Auswahl, kein Freitext) — für
+  /// alle Spieler sichtbar, an der Position des Senders.
+  String? lastEmoji;
+  String? lastEmojiSenderId;
+  int emojiSeq = 0;
+  int? _lastEmojiTs;
+
   // Turn-Timeout
   int remainingTime = 10;
   Timer? _turnTimer;
@@ -193,6 +200,20 @@ class GameController extends ChangeNotifier {
         _lastFlashedCardId = top.id;
         lastReactionCard = top;
         reactionFlashSeq++;
+      }
+
+      // Emoji-Reaktion eines Spielers -> für alle sichtbar, an dessen Position.
+      final emojiPing = data['emojiPing'];
+      if (emojiPing is Map) {
+        final ts = (emojiPing['ts'] as num?)?.toInt();
+        final emoji = emojiPing['emoji']?.toString();
+        final sender = emojiPing['senderId']?.toString();
+        if (ts != null && emoji != null && sender != null && ts != _lastEmojiTs) {
+          _lastEmojiTs = ts;
+          lastEmoji = emoji;
+          lastEmojiSenderId = sender;
+          emojiSeq++;
+        }
       }
 
       // Sync remainingTime from Firebase so non-active players see the countdown

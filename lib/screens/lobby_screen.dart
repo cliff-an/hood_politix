@@ -8,6 +8,7 @@ import '../models/game_controller.dart';
 import 'friends_screen.dart';
 import 'game_screen.dart';
 import 'profile_screen.dart';
+import 'rules_screen.dart';
 
 class LobbyScreen extends StatelessWidget {
   final String userId;
@@ -102,6 +103,13 @@ class LobbyScreen extends StatelessWidget {
         backgroundColor: Colors.transparent,
         elevation: 0,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.menu_book),
+            tooltip: 'Regeln',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const RulesScreen()),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.people),
             tooltip: 'Freunde',

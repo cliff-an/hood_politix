@@ -1698,6 +1698,17 @@ Future<void> advanceToNextPlayer(String gameId) async {
     return snap.exists ? snap.value?.toString() : null;
   }
 
+  /// Schickt eine Emoji-Reaktion an alle Mitspieler. Bewusst nur ein fest
+  /// vorgegebenes Emoji statt freiem Text — verhindert unangemessene
+  /// Kommentare, ohne dass die Interaktion zwischen Spielern ganz fehlt.
+  Future<void> sendEmojiReaction(String gameId, String senderId, String emoji) {
+    return _database.ref('games/$gameId/gameState/emojiPing').set({
+      'senderId': senderId,
+      'emoji': emoji,
+      'ts': ServerValue.timestamp,
+    });
+  }
+
   Future<void> continueReactionChain(
     String gameId,
     String reactingPlayerId,

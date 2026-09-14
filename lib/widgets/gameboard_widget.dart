@@ -41,6 +41,21 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
   GameCard? _flashCard;
   int _seenReactionFlashSeq = -1;
 
+  // Emoji-Reaktionen: fliegen kurz über dem Avatar des Senders hoch und
+  // blenden aus. Nur eine feste, moderierte Auswahl (siehe _quickEmojis) —
+  // bewusst kein Freitext-Chat, damit unangemessene Kommentare gar nicht
+  // erst möglich sind.
+  late final AnimationController _emojiBubbleCtrl;
+  late final Animation<double> _emojiBubbleOpacity;
+  late final Animation<Offset> _emojiBubbleRise;
+  int _seenEmojiSeq = -1;
+  String? _emojiBubbleText;
+  Offset? _emojiBubblePos;
+
+  static const List<String> _quickEmojis = [
+    '😂', '😮', '😡', '👍', '👎', '🔥', '😱', '🤔', '💀', '🎉', '👀', '🙏',
+  ];
+
   @override
   void initState() {
     super.initState();
@@ -81,6 +96,21 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
       TweenSequenceItem(tween: Tween(begin: 1.15, end: 1.0), weight: 12),
       TweenSequenceItem(tween: ConstantTween(1.0), weight: 58),
     ]).animate(_reactionFlashCtrl);
+
+    // Emoji-Bubble: poppt kurz hoch, steigt leicht auf, blendet aus.
+    _emojiBubbleCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1600),
+    );
+    _emojiBubbleOpacity = TweenSequence<double>([
+      TweenSequenceItem(tween: Tween(begin: 0.0, end: 1.0), weight: 10),
+      TweenSequenceItem(tween: ConstantTween(1.0), weight: 60),
+      TweenSequenceItem(tween: Tween(begin: 1.0, end: 0.0), weight: 30),
+    ]).animate(_emojiBubbleCtrl);
+    _emojiBubbleRise = Tween<Offset>(
+      begin: Offset.zero,
+      end: const Offset(0, -0.9),
+    ).animate(CurvedAnimation(parent: _emojiBubbleCtrl, curve: Curves.easeOut));
   }
 
   @override
@@ -89,7 +119,43 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
     _popCtrl.dispose();
     _directionCtrl.dispose();
     _reactionFlashCtrl.dispose();
+    _emojiBubbleCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _showEmojiPicker(BuildContext context, String gameId, String myId) async {
+    final emoji = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.black87,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return Padding(
+          padding: const EdgeInsets.all(16),
+          child: Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 12,
+            runSpacing: 12,
+            children: _quickEmojis
+                .map(
+                  (e) => InkWell(
+                    borderRadius: BorderRadius.circular(28),
+                    onTap: () => Navigator.of(ctx).pop(e),
+                    child: Padding(
+                      padding: const EdgeInsets.all(6),
+                      child: Text(e, style: const TextStyle(fontSize: 30)),
+                    ),
+                  ),
+                )
+                .toList(),
+          ),
+        );
+      },
+    );
+    if (emoji != null) {
+      await FirebaseService.instance.sendEmojiReaction(gameId, myId, emoji);
+    }
   }
 
   @override
@@ -110,6 +176,15 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
         _reactionFlashCtrl.forward(from: 0);
       });
     }
+
+    // Neue Emoji-Reaktion gemeldet -> Bubble über dem Avatar des Senders
+    // anstoßen (Position wird weiter unten beim Layout der Avatare befüllt,
+    // deshalb hier nur den Seq-Stand + Emoji merken; die genaue Position
+    // wird unten anhand von avatarPositions aufgelöst).
+    final pendingEmojiSeq = ctrl.emojiSeq != _seenEmojiSeq && ctrl.lastEmoji != null
+        ? ctrl.emojiSeq
+        : null;
+
     final size = MediaQuery.of(context).size;
 
     final shortestSide = min(size.width, size.height);
@@ -386,6 +461,9 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
     const minY = headerBottom + 8;
     final baseY = size.height * 0.30;
     final arcLift = size.height * 0.15;
+    // Avatar-Positionen je Spieler merken, damit Emoji-Reaktionen (siehe
+    // unten) an der richtigen Stelle auftauchen können.
+    final Map<String, Offset> avatarPositions = {};
     for (var i = 0; i < opponents.length; i++) {
       final double x;
       final double y;
@@ -402,6 +480,7 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
         y = rawY < minY ? minY : rawY;
       }
       final opp = opponents[i];
+      avatarPositions[opp.id] = Offset(x, y);
 
       layers.add(
         StreamBuilder<DatabaseEvent>(
@@ -578,6 +657,10 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
     // der Gegner).
     // Position centres a 84×104 Bereich (Ring + "Am Zug"-Badge darunter);
     // non-turn avatar (54px) uses same anchor
+    avatarPositions[myId] = Offset(
+      size.width / 2,
+      size.height - (edgeM + cardW * 1.5 + 40) - 42,
+    );
     layers.add(
       Positioned(
         bottom: edgeM + cardW * 1.5 + 40,
@@ -651,6 +734,61 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
                 radius: 27,
                 backgroundImage: AssetImage('lib/images/man.png'),
               ),
+      ),
+    );
+
+    // Emoji-Reaktion eines Spielers: Bubble über dessen Avatar anstoßen,
+    // sobald sich dessen Position (Gegner oder man selbst) auflösen lässt.
+    if (pendingEmojiSeq != null) {
+      final pos = avatarPositions[ctrl.lastEmojiSenderId];
+      if (pos != null) {
+        _seenEmojiSeq = pendingEmojiSeq;
+        final text = ctrl.lastEmoji!;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          setState(() {
+            _emojiBubbleText = text;
+            _emojiBubblePos = pos;
+          });
+          _emojiBubbleCtrl.forward(from: 0);
+        });
+      }
+    }
+    if (_emojiBubbleText != null && _emojiBubblePos != null) {
+      layers.add(
+        Positioned(
+          left: _emojiBubblePos!.dx - 22,
+          top: _emojiBubblePos!.dy - 60,
+          child: IgnorePointer(
+            child: AnimatedBuilder(
+              animation: _emojiBubbleCtrl,
+              builder: (_, child) => Opacity(
+                opacity: _emojiBubbleOpacity.value,
+                child: FractionalTranslation(
+                  translation: _emojiBubbleRise.value,
+                  child: child,
+                ),
+              ),
+              child: Text(_emojiBubbleText!, style: const TextStyle(fontSize: 40)),
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Emoji-Button links unten — feste, moderierte Auswahl statt Freitext,
+    // damit Spieler ohne unangemessene Kommentare miteinander interagieren
+    // können.
+    layers.add(
+      Positioned(
+        bottom: cardW * 1.6 + 32,
+        left: 16,
+        child: FloatingActionButton.small(
+          heroTag: 'emojiPicker',
+          backgroundColor: Colors.black54,
+          onPressed: () => _showEmojiPicker(context, widget.gameId, myId),
+          child: const Text('😀', style: TextStyle(fontSize: 20)),
+        ),
       ),
     );
 
