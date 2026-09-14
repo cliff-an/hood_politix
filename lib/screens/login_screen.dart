@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
+import 'package:video_player/video_player.dart';
 
 import '../models/avatar_catalog.dart';
 import '../models/firebase_service.dart';
@@ -25,6 +26,35 @@ class _LoginScreenState extends State<LoginScreen> {
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _isLoading = false;
+
+  // Stummer Endlos-Loop desselben Clips, der schon beim Spielstart gezeigt
+  // wird (siehe StartVideoOverlay) — ersetzt das bisher komplett statische,
+  // stark abgedunkelte Hintergrundbild auf dem allerersten Bildschirm.
+  VideoPlayerController? _bgVideo;
+
+  @override
+  void initState() {
+    super.initState();
+    final controller = VideoPlayerController.asset('lib/vids/HP_video.mp4');
+    controller
+        .initialize()
+        .then((_) {
+          if (!mounted) {
+            controller.dispose();
+            return;
+          }
+          controller
+            ..setLooping(true)
+            ..setVolume(0)
+            ..play();
+          setState(() => _bgVideo = controller);
+        })
+        .catchError((_) {
+          // Kein Video verfügbar (z. B. Web ohne Codec-Support) -> das
+          // statische Hintergrundbild bleibt einfach sichtbar.
+          controller.dispose();
+        });
+  }
 
   /// 1️⃣ Anmeldung
   Future<void> _signIn() async {
@@ -169,6 +199,7 @@ class _LoginScreenState extends State<LoginScreen> {
   void dispose() {
     _usernameController.dispose();
     _passwordController.dispose();
+    _bgVideo?.dispose();
     super.dispose();
   }
 
@@ -289,14 +320,31 @@ class _LoginScreenState extends State<LoginScreen> {
       body: Stack(
         fit: StackFit.expand,
         children: [
+          // Statisches Bild bleibt als unterste Ebene erhalten — Fallback,
+          // solange das Video lädt (oder falls es z. B. im Web am
+          // Codec-Support scheitert), damit nie ein leerer/schwarzer
+          // Bildschirm aufblitzt.
           Image.asset('lib/images/background.png', fit: BoxFit.cover),
-          // Abdunkeln für Lesbarkeit, stärker an den Rändern
+          if (_bgVideo != null && _bgVideo!.value.isInitialized)
+            SizedBox.expand(
+              child: FittedBox(
+                fit: BoxFit.cover,
+                child: SizedBox(
+                  width: _bgVideo!.value.size.width,
+                  height: _bgVideo!.value.size.height,
+                  child: VideoPlayer(_bgVideo!),
+                ),
+              ),
+            ),
+          // Abdunkeln für Lesbarkeit, stärker an den Rändern — deutlich
+          // leichter als zuvor (black38/87), sonst verschluckt es genau
+          // die Farbe/Bewegung, die das Video eigentlich bringen soll.
           Container(
             decoration: const BoxDecoration(
               gradient: RadialGradient(
                 center: Alignment.center,
                 radius: 1.1,
-                colors: [Colors.black38, Colors.black87],
+                colors: [Colors.black12, Colors.black54],
               ),
             ),
           ),

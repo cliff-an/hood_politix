@@ -97,6 +97,13 @@ class DragTargetWidget extends StatelessWidget {
                     ? Image.asset(
                         CardImageFactory.getCardImagePath(topCard!),
                         key: ValueKey(topCard!.id),
+                        // Ohne explizites fit rendert das Bild in seiner
+                        // eigenen Seitenverhältnis-Logik statt die Box
+                        // exakt auszufüllen — dadurch wirkte der
+                        // Ablagestapel kleiner als Deck/Handkarten (die
+                        // beide BoxFit.cover nutzen) und die Umrandung
+                        // saß sichtbar außerhalb des Kartenbilds.
+                        fit: BoxFit.cover,
                       )
                     : const Center(
                         key: ValueKey('empty'),

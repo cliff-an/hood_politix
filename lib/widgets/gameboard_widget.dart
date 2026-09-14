@@ -328,7 +328,14 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
     // Ablagestapel, spiegelt bei Gegenuhrzeigersinn (Payback-Karte). Dunkle
     // Scheibe dahinter, sonst geht das Orange im bunten Hintergrundbild unter.
     final tableCenter = Offset((deckCenter.dx + discCenter.dx) / 2, deckCenter.dy);
-    final ringSize = (discCenter.dx - deckCenter.dx) + stackW * 1.25;
+    // Zusätzlich durch einen Bruchteil der Bildschirmhöhe gedeckelt — sonst
+    // reicht der Ring bei einem breiten Deck/Ablage-Abstand (o.g. Formel)
+    // vertikal bis in die Gegner-Avatare (mittlerer Bogen-Gegner) bzw. den
+    // eigenen Avatar hinein und überlappt sie sichtbar.
+    final ringSize = min(
+      (discCenter.dx - deckCenter.dx) + stackW * 1.25,
+      size.height * 0.37,
+    );
     const directionColor = Color(0xFFFFA542);
     layers.add(Positioned(
       left: tableCenter.dx - ringSize / 2,
@@ -888,13 +895,19 @@ class _DoubleArrowPainter extends CustomPainter {
       ..color = color
       ..style = PaintingStyle.stroke
       ..strokeWidth = strokeWidth
-      ..strokeCap = StrokeCap.round;
+      // butt statt round: ein rundes Stroke-Ende sitzt genau dort, wo auch
+      // die Pfeilspitze anfängt, und verschmilzt optisch mit ihr zu einem
+      // unklaren Klecks statt einer klar erkennbaren Spitze.
+      ..strokeCap = StrokeCap.butt;
     final headPaint = Paint()
       ..color = color
       ..style = PaintingStyle.fill;
 
-    final headLen = strokeWidth * 3.0;
-    final headWidth = strokeWidth * 2.2;
+    // Deutlich größer als vorher (3.0x/2.2x) — bei typischer Ringgröße war
+    // die Spitze kaum von der Bogenlinie zu unterscheiden und wirkte nicht
+    // wie ein "echter" Pfeil.
+    final headLen = strokeWidth * 4.2;
+    final headWidth = strokeWidth * 3.4;
 
     void drawArrow(double startAngle, double sweepAngle) {
       canvas.drawArc(

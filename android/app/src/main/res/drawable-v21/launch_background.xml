@@ -1,7 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Modify this file to customize your launch splash screen -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:drawable="?android:colorBackground" />
+    <!-- War ?android:colorBackground (= reines Theme-Weiß/Schwarz je nach
+         Hell-/Dunkelmodus) — API 21+ nutzt DIESE Datei statt der Basis-
+         drawable/launch_background.xml, war also die eigentliche Ursache
+         für den komplett farblosen Start-Bildschirm. -->
+    <item android:drawable="@color/launch_background" />
 
     <!-- You can insert your own image assets here -->
     <!-- <item>

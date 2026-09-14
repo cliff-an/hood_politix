@@ -1,4 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#FFFFFF</color> <!-- oder eine Farbe deiner Wahl -->
+    <!-- Gleiches dunkles Lila wie ic_launcher_adaptive_back.png und das Web-
+         Manifest (background_color/theme_color) — der native Splash-
+         Screen (bevor Flutter übernimmt) war bisher reines Weiß, obwohl
+         @color/launch_background hier referenziert wird, aber nirgends
+         definiert war. -->
+    <color name="launch_background">#1A1625</color>
 </resources>
