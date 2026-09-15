@@ -193,6 +193,31 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
         .clamp(48.0, 80.0);
     const edgeM = 16.0;
 
+    // WICHTIG: MediaQuery.size ist in logischen Pixeln (dp), NICHT den
+    // physischen Pixeln eines Screenshots. Ein reales Telefon im
+    // Querformat hat oft nur ~350-450dp Höhe (z. B. Pixel 4a: 1080px bei
+    // devicePixelRatio 2.75 -> ~393dp) — deutlich weniger, als cardW
+    // allein (unten bei 48 gedeckelt) vermuten lässt. Avatar-Kreise,
+    // Puls-Ringe und Abzeichen waren bisher mit festen dp-Werten codiert,
+    // die für ein "großzügiges" Display kalibriert waren; auf einem
+    // realen Telefon blieb dadurch schlicht nicht genug Höhe für Header +
+    // Gegner-Bogen + Tischmitte + eigenen Avatar + Hand übrig — DESHALB
+    // landete der eigene Avatar mitten im Ring, unabhängig von dessen
+    // Größe. vScale schrumpft alle Avatar-Größen (nicht nur deren
+    // Position) proportional zur tatsächlich verfügbaren Höhe.
+    final vScale = (size.height / 500.0).clamp(0.55, 1.0);
+
+    // Feste Avatar-Größen, EINMAL hier definiert und unten sowohl bei der
+    // Ring-Platzbudget-Berechnung als auch beim tatsächlichen Rendern der
+    // Avatare wiederverwendet (nie zwei getrennte Zahlen für dieselbe
+    // Sache) — genau das Auseinanderlaufen zweier unabhängig gepflegter
+    // Konstanten für ein und dieselbe Box war die Ursache dafür, dass der
+    // eigene Avatar trotz mehrerer "Fixes" weiter in den Ring hineinragte.
+    final oppAvatarBoxSize = 40.0 * vScale;
+    final ownAvatarBoxSize = 48.0 * vScale;
+    final ownAvatarBadgeAllowance = 20.0 * vScale;
+    final ownBottomGap = 16.0 * vScale;
+
     if (ctrl.currentPlayerId == null) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -330,45 +355,64 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
     // cardWidth weiter unten bei PersistentPlayerHandWidget), damit Deck,
     // Ablagestapel und Handkarten gleich groß wirken.
     final stackW = cardW.clamp(24.0, 48.0);
-    final deckCenter = Offset(size.width * 0.4, size.height * 0.5);
-    final discCenter = Offset(size.width * 0.6, size.height * 0.5);
 
+    // Vertikales Platzbudget: erst berechnen, WO die Gegner- und die
+    // eigene Avatar-Zone tatsächlich enden/beginnen (auf Basis derselben
+    // Größen, die unten beim Rendern verwendet werden — siehe
+    // oppAvatarBoxSize/ownAvatarBoxSize oben), dann Deck/Ablage/Ring
+    // MITTIG in die verbleibende Lücke setzen, statt sie unabhängig davon
+    // auf eine feste Bildschirmmitte (0.5) zu legen. Eine feste Mitte
+    // ignoriert, dass Kopf- und Handbereich unterschiedlich viel Platz
+    // brauchen, und genau das ließ auf kurzen Querformat-Bildschirmen
+    // (z. B. Pixel 4a: ~393dp Höhe) beide Avatar-Zonen bis übers Zentrum
+    // hinausreichen.
+    final baseY = size.height * 0.30;
+    final arcLift = size.height * 0.15;
+    // Header-Höhe: edgeM + IconButton (48px) + Platz für bis zu zwei
+    // gestapelte Badges (aktueller Spieler + Countdown) — begrenzt, wie
+    // weit der Bogen-Gegner nach oben gezogen werden darf (siehe
+    // Opponents-Schleife unten), muss hier also für den ungünstigsten
+    // Fall genauso berücksichtigt werden. Bewusst NICHT mit vScale
+    // geschrumpft: Text/Icon-Mindestgrößen sind fix, nicht die Ursache
+    // des Platzproblems.
+    const headerBottom = edgeM + 56.0;
+    const minY = headerBottom + 8;
+    // Tatsächliche Gegner-Spalte (von oben nach unten): Mini-Kartenreihe
+    // (~30) + Abstand (4*vScale) + Avatar-Box (oppAvatarBoxSize) + Name
+    // (~14) + "Am Zug"-Badge (~14, nur wenn dieser Gegner am Zug ist —
+    // worst case also mitgerechnet). Die Avatar-Box wird an ihrem
+    // MITTELPUNKT positioniert (siehe "top: y - cardW/2" unten in der
+    // Opponents-Schleife), ihr sichtbarer oberer Rand liegt also um
+    // cardW/2 HÖHER als y — deshalb hier abgezogen, sonst würde die Zone
+    // künstlich zu tief angesetzt.
+    final avatarClearance = 58.0 + 4.0 * vScale + oppAvatarBoxSize - cardW / 2;
+    final oppAvatarBottom = max(baseY - arcLift, minY) + avatarClearance;
+    // Eigene Avatar-Spalte (von unten nach oben, ab Handkarten-Oberkante):
+    // Lücke zur Hand (ownBottomGap) + Avatar-Box (ownAvatarBoxSize) +
+    // "Du bist dran"-Badge (ownAvatarBadgeAllowance).
+    final ownAvatarTop = size.height -
+        (edgeM + cardW * 1.5 + ownBottomGap) -
+        (ownAvatarBoxSize + ownAvatarBadgeAllowance);
+    final ringMargin = 10.0 * vScale;
+    final verticalCenterY = (oppAvatarBottom + ownAvatarTop) / 2;
+    final deckCenter = Offset(size.width * 0.4, verticalCenterY);
+    final discCenter = Offset(size.width * 0.6, verticalCenterY);
     // Richtungsanzeige: rotierender Doppelpfeilring zwischen Deck und
     // Ablagestapel, spiegelt bei Gegenuhrzeigersinn (Payback-Karte). Dunkle
     // Scheibe dahinter, sonst geht das Orange im bunten Hintergrundbild unter.
     final tableCenter = Offset((deckCenter.dx + discCenter.dx) / 2, deckCenter.dy);
-    // Zusätzlich durch den tatsächlich verfügbaren Vertikalabstand zu den
-    // Avataren gedeckelt — ein fester Bruchteil der Bildschirmhöhe allein
-    // reicht nicht: cardW ist auf [48,80] gedeckelt und schrumpft auf
-    // niedrigeren/kürzeren Displays (z. B. viele Smartphones im
-    // Querformat mit weniger als ~950px Höhe) nicht im gleichen Maß wie
-    // der Ring, wodurch Ring und Avatare dort trotzdem überlappen konnten.
-    // baseY/arcLift bestimmen unten die Gegner-Bogenposition — der
-    // mittlere Gegner (bei ungerader Anzahl exakt auf x=50%, also
-    // horizontal auf Höhe des Rings) kommt im ungünstigsten Fall bis
-    // (baseY - arcLift) hoch; der eigene Avatar sitzt unten fest an
-    // (edgeM + cardW*1.5 + 40) über der Hand, mit bis zu 104px Höhe im
-    // "Am Zug"-Zustand.
-    final baseY = size.height * 0.30;
-    final arcLift = size.height * 0.15;
-    // Header-Höhe: edgeM + IconButton (48px) + etwas Abstand — begrenzt,
-    // wie weit der Bogen-Gegner nach oben gezogen werden darf (siehe
-    // Opponents-Schleife unten), muss hier also für den ungünstigsten
-    // Fall genauso berücksichtigt werden.
-    const headerBottom = edgeM + 56.0;
-    const minY = headerBottom + 8;
-    const avatarClearance = 160.0; // Mini-Karten + Avatar-Kreis + Name + Badge
-    final oppAvatarBottom = max(baseY - arcLift, minY) + avatarClearance;
-    final ownAvatarTop =
-        size.height - (edgeM + cardW * 1.5 + 40) - 104;
-    const ringMargin = 24.0;
     final maxRingRadiusForAvatars = min(
       tableCenter.dy - oppAvatarBottom,
       ownAvatarTop - tableCenter.dy,
     ) - ringMargin;
+    // Kein hoher fester Mindestradius mehr (der frühere 48px-Boden
+    // erzwang auf engen Bildschirmen einen Ring, der größer war als der
+    // tatsächlich sichere Platz — und überlappte dadurch trotz negativem
+    // maxRingRadiusForAvatars die Avatare). 16px ist nur ein Notanker
+    // gegen einen unsichtbaren Ring, kein Zielwert.
     final ringSize = min(
       (discCenter.dx - deckCenter.dx) + stackW * 1.25,
-      max(48.0, maxRingRadiusForAvatars) * 2,
+      max(16.0, maxRingRadiusForAvatars) * 2,
     );
     const directionColor = Color(0xFFFFA542);
     layers.add(Positioned(
@@ -585,12 +629,12 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 4),
+                  SizedBox(height: 4 * vScale),
                   // Glow + feste Umrandung, wenn dieser Gegner am Zug ist
                   if (ctrl.currentPlayerId == opp.id)
                     SizedBox(
-                      width: 64,
-                      height: 64,
+                      width: oppAvatarBoxSize,
+                      height: oppAvatarBoxSize,
                       child: Stack(
                         alignment: Alignment.center,
                         clipBehavior: Clip.none,
@@ -600,7 +644,7 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
                             animation: _pulseCtrl,
                             builder: (_, __) {
                               final t = _pulseCtrl.value;
-                              final d = 48.0 + 16.0 * t;
+                              final d = (28.0 + 8.0 * t) * vScale;
                               return Container(
                                 width: d,
                                 height: d,
@@ -614,8 +658,8 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
                           ),
                           // Feste, immer sichtbare Umrandung (unabhängig von der Animation)
                           Container(
-                            width: 46,
-                            height: 46,
+                            width: 30 * vScale,
+                            height: 30 * vScale,
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
                               border: Border.all(
@@ -630,7 +674,7 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
                               ],
                             ),
                             child: CircleAvatar(
-                              radius: 20,
+                              radius: 13 * vScale,
                               backgroundImage: AssetImage(ctrl.playerAvatar(opp.id)),
                             ),
                           ),
@@ -648,7 +692,7 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
                       clipBehavior: Clip.none,
                       children: [
                         CircleAvatar(
-                          radius: 20,
+                          radius: 13 * vScale,
                           backgroundImage: AssetImage(ctrl.playerAvatar(opp.id)),
                         ),
                         if (opp.isBot)
@@ -710,27 +754,30 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
     // Eigener Avatar — dieselbe feste Umrandung + Puls wie bei Gegnern
     // (vorher nur ein schwaches, animationsabhängiges Glühen ohne festen
     // Ring — dadurch stach der eigene Zug visuell schwächer heraus als der
-    // der Gegner).
-    // Position centres a 84×104 Bereich (Ring + "Am Zug"-Badge darunter);
-    // non-turn avatar (54px) uses same anchor
+    // der Gegner). Alle Größen mit vScale skaliert (siehe Kommentar oben
+    // bei dessen Definition) — auf einem realen Telefon mit wenig
+    // logischer Höhe reichte der unskalierte 84×104-Bereich bis in den
+    // Ring hinein.
+    final ownBoxW = ownAvatarBoxSize;
+    final ownBoxH = ownAvatarBoxSize + ownAvatarBadgeAllowance;
     avatarPositions[myId] = Offset(
       size.width / 2,
-      size.height - (edgeM + cardW * 1.5 + 40) - 42,
+      size.height - (edgeM + cardW * 1.5 + ownBottomGap) - ownBoxW / 2,
     );
     layers.add(
       Positioned(
-        bottom: edgeM + cardW * 1.5 + 40,
-        left: size.width / 2 - 42,
+        bottom: edgeM + cardW * 1.5 + ownBottomGap,
+        left: size.width / 2 - ownBoxW / 2,
         child: isTurn
             ? SizedBox(
-                width: 84,
-                height: 104,
+                width: ownBoxW,
+                height: ownBoxH,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     SizedBox(
-                      width: 84,
-                      height: 84,
+                      width: ownBoxW,
+                      height: ownBoxW,
                       child: Stack(
                         alignment: Alignment.center,
                         clipBehavior: Clip.none,
@@ -740,7 +787,7 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
                             animation: _pulseCtrl,
                             builder: (_, __) {
                               final t = _pulseCtrl.value; // 0.0 → 1.0 → 0.0
-                              final d = 58.0 + 22.0 * t;
+                              final d = (34.0 + 10.0 * t) * vScale;
                               return Container(
                                 width: d,
                                 height: d,
@@ -754,8 +801,8 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
                           ),
                           // Feste, immer sichtbare Umrandung (unabhängig von der Animation)
                           Container(
-                            width: 58,
-                            height: 58,
+                            width: 36 * vScale,
+                            height: 36 * vScale,
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
                               border: Border.all(color: Colors.orangeAccent, width: 3.5),
@@ -763,9 +810,9 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
                                 BoxShadow(color: Colors.black54, blurRadius: 4),
                               ],
                             ),
-                            child: const CircleAvatar(
-                              radius: 27,
-                              backgroundImage: AssetImage('lib/images/man.png'),
+                            child: CircleAvatar(
+                              radius: 16 * vScale,
+                              backgroundImage: const AssetImage('lib/images/man.png'),
                             ),
                           ),
                         ],
@@ -786,9 +833,9 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
                   ],
                 ),
               )
-            : const CircleAvatar(
-                radius: 27,
-                backgroundImage: AssetImage('lib/images/man.png'),
+            : CircleAvatar(
+                radius: 16 * vScale,
+                backgroundImage: const AssetImage('lib/images/man.png'),
               ),
       ),
     );
