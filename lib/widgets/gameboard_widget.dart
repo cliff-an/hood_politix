@@ -295,6 +295,18 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
                 tooltip: 'Spiel verlassen',
                 onPressed: () async {
                   final navigator = Navigator.of(context);
+                  // ERST den Controller (Zug-Timer, BotGameDriver, alle
+                  // Firebase-Listener) abbauen, DANN leaveGame aufrufen —
+                  // nicht umgekehrt. leaveGame entfernt uns aus players/,
+                  // und danach hat dieser Client keine Schreibrechte mehr
+                  // auf das Spiel. Lief der Controller noch, konnte einer
+                  // seiner Listener (z. B. der Zug-Timer oder — als
+                  // gewählter Anführer — der BotGameDriver) durch genau
+                  // diesen Schreibzugriff selbst nochmal ausgelöst werden
+                  // und mit PERMISSION_DENIED scheitern.
+                  if (GameController.hasInstance) {
+                    GameController.instance.dispose();
+                  }
                   await svc.leaveGame(widget.gameId, myId);
                   // Kein Navigator.pop(): GameScreen wird nur per
                   // pushReplacement erreicht, der Verlaufsstapel hat also
@@ -302,9 +314,6 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
                   // führte hier zu einem weißen Screen. Stattdessen wie
                   // beim "Zur Lobby"-Button in GameOverScreen direkt zur
                   // Lobby navigieren.
-                  if (GameController.hasInstance) {
-                    GameController.instance.dispose();
-                  }
                   navigator.pushAndRemoveUntil(
                     MaterialPageRoute(builder: (_) => LobbyScreen(userId: myId)),
                     (_) => false,
@@ -328,13 +337,38 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
     // Ablagestapel, spiegelt bei Gegenuhrzeigersinn (Payback-Karte). Dunkle
     // Scheibe dahinter, sonst geht das Orange im bunten Hintergrundbild unter.
     final tableCenter = Offset((deckCenter.dx + discCenter.dx) / 2, deckCenter.dy);
-    // Zusätzlich durch einen Bruchteil der Bildschirmhöhe gedeckelt — sonst
-    // reicht der Ring bei einem breiten Deck/Ablage-Abstand (o.g. Formel)
-    // vertikal bis in die Gegner-Avatare (mittlerer Bogen-Gegner) bzw. den
-    // eigenen Avatar hinein und überlappt sie sichtbar.
+    // Zusätzlich durch den tatsächlich verfügbaren Vertikalabstand zu den
+    // Avataren gedeckelt — ein fester Bruchteil der Bildschirmhöhe allein
+    // reicht nicht: cardW ist auf [48,80] gedeckelt und schrumpft auf
+    // niedrigeren/kürzeren Displays (z. B. viele Smartphones im
+    // Querformat mit weniger als ~950px Höhe) nicht im gleichen Maß wie
+    // der Ring, wodurch Ring und Avatare dort trotzdem überlappen konnten.
+    // baseY/arcLift bestimmen unten die Gegner-Bogenposition — der
+    // mittlere Gegner (bei ungerader Anzahl exakt auf x=50%, also
+    // horizontal auf Höhe des Rings) kommt im ungünstigsten Fall bis
+    // (baseY - arcLift) hoch; der eigene Avatar sitzt unten fest an
+    // (edgeM + cardW*1.5 + 40) über der Hand, mit bis zu 104px Höhe im
+    // "Am Zug"-Zustand.
+    final baseY = size.height * 0.30;
+    final arcLift = size.height * 0.15;
+    // Header-Höhe: edgeM + IconButton (48px) + etwas Abstand — begrenzt,
+    // wie weit der Bogen-Gegner nach oben gezogen werden darf (siehe
+    // Opponents-Schleife unten), muss hier also für den ungünstigsten
+    // Fall genauso berücksichtigt werden.
+    const headerBottom = edgeM + 56.0;
+    const minY = headerBottom + 8;
+    const avatarClearance = 160.0; // Mini-Karten + Avatar-Kreis + Name + Badge
+    final oppAvatarBottom = max(baseY - arcLift, minY) + avatarClearance;
+    final ownAvatarTop =
+        size.height - (edgeM + cardW * 1.5 + 40) - 104;
+    const ringMargin = 24.0;
+    final maxRingRadiusForAvatars = min(
+      tableCenter.dy - oppAvatarBottom,
+      ownAvatarTop - tableCenter.dy,
+    ) - ringMargin;
     final ringSize = min(
       (discCenter.dx - deckCenter.dx) + stackW * 1.25,
-      size.height * 0.37,
+      max(48.0, maxRingRadiusForAvatars) * 2,
     );
     const directionColor = Color(0xFFFFA542);
     layers.add(Positioned(
@@ -463,11 +497,9 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
     // weil dieser mittlere Gegner stattdessen am höchsten Punkt des Bogens
     // sitzt und so am weitesten vom eigenen Avatar entfernt ist.
     final opponents = ctrl.players.where((p) => p.id != myId).toList();
-    // Header-Höhe: edgeM + IconButton (48px) + etwas Abstand
-    const headerBottom = edgeM + 56.0;
-    const minY = headerBottom + 8;
-    final baseY = size.height * 0.30;
-    final arcLift = size.height * 0.15;
+    // headerBottom/minY/baseY/arcLift werden schon oben bei der
+    // Ring-Größenberechnung gebraucht (siehe dort) und deshalb nicht hier
+    // neu deklariert.
     // Avatar-Positionen je Spieler merken, damit Emoji-Reaktionen (siehe
     // unten) an der richtigen Stelle auftauchen können.
     final Map<String, Offset> avatarPositions = {};

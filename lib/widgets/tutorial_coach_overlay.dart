@@ -72,10 +72,15 @@ class _TutorialCoachOverlayState extends State<TutorialCoachOverlay> {
     final uid = _myUid;
     if (uid == null) return;
     final navigator = Navigator.of(context);
-    await FirebaseService.instance.leaveGame(widget.gameId, uid);
+    // ERST den Controller abbauen, DANN leaveGame — sonst kann der noch
+    // laufende BotGameDriver (als Anführer) auf genau die Änderung
+    // reagieren, die leaveGame auslöst, und mit PERMISSION_DENIED
+    // scheitern, weil wir dann schon aus players/ entfernt sind. Siehe
+    // gameboard_widget.dart's "Spiel verlassen"-Button.
     if (GameController.hasInstance) {
       GameController.instance.dispose();
     }
+    await FirebaseService.instance.leaveGame(widget.gameId, uid);
     navigator.pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => LobbyScreen(userId: uid)),
       (_) => false,
