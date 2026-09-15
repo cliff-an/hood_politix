@@ -216,7 +216,6 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
     final oppAvatarBoxSize = 40.0 * vScale;
     final ownAvatarBoxSize = 48.0 * vScale;
     final ownAvatarBadgeAllowance = 20.0 * vScale;
-    final ownBottomGap = 16.0 * vScale;
 
     if (ctrl.currentPlayerId == null) {
       return const Center(child: CircularProgressIndicator());
@@ -387,23 +386,28 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
     // künstlich zu tief angesetzt.
     final avatarClearance = 58.0 + 4.0 * vScale + oppAvatarBoxSize - cardW / 2;
     final oppAvatarBottom = max(baseY - arcLift, minY) + avatarClearance;
-    // Eigene Avatar-Spalte (von unten nach oben, ab Handkarten-Oberkante):
-    // Lücke zur Hand (ownBottomGap) + Avatar-Box (ownAvatarBoxSize) +
-    // "Du bist dran"-Badge (ownAvatarBadgeAllowance).
-    final ownAvatarTop = size.height -
-        (edgeM + cardW * 1.5 + ownBottomGap) -
-        (ownAvatarBoxSize + ownAvatarBadgeAllowance);
+    // Untere Zone: der eigene Avatar sitzt NICHT mehr oberhalb der Hand,
+    // sondern seitlich daneben (siehe unten bei "Eigener Avatar") — braucht
+    // hier also keinen eigenen Platz mehr. Einzige verbleibende Grenze ist
+    // die Hand selbst: Sie fächert sich leicht auf (siehe
+    // PersistentPlayerHandWidget._buildFan, "height = cardW*1.5 + 32" —
+    // die mittlere Karte reicht bis ganz an die Oberkante dieser Zone),
+    // plus ein kleiner Sicherheitsabstand zum Ring.
+    const handFanAllowance = 32.0;
+    const ringToHandGap = 12.0;
+    final handZoneTop =
+        size.height - (edgeM + cardW * 1.5 + handFanAllowance + ringToHandGap);
     final ringMargin = 10.0 * vScale;
-    final verticalCenterY = (oppAvatarBottom + ownAvatarTop) / 2;
+    final verticalCenterY = (oppAvatarBottom + handZoneTop) / 2;
     final deckCenter = Offset(size.width * 0.4, verticalCenterY);
     final discCenter = Offset(size.width * 0.6, verticalCenterY);
-    // Richtungsanzeige: rotierender Doppelpfeilring zwischen Deck und
+    // Richtungsanzeige: rotierender Pfeilring zwischen Deck und
     // Ablagestapel, spiegelt bei Gegenuhrzeigersinn (Payback-Karte). Dunkle
     // Scheibe dahinter, sonst geht das Orange im bunten Hintergrundbild unter.
     final tableCenter = Offset((deckCenter.dx + discCenter.dx) / 2, deckCenter.dy);
     final maxRingRadiusForAvatars = min(
       tableCenter.dy - oppAvatarBottom,
-      ownAvatarTop - tableCenter.dy,
+      handZoneTop - tableCenter.dy,
     ) - ringMargin;
     // Kein hoher fester Mindestradius mehr (der frühere 48px-Boden
     // erzwang auf engen Bildschirmen einen Ring, der größer war als der
@@ -450,12 +454,12 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
                     return Transform.rotate(
                       angle: _directionCtrl.value * 2 * pi,
                       child: SizedBox(
-                        width: ringSize * 0.6,
-                        height: ringSize * 0.6,
+                        width: ringSize * 0.7,
+                        height: ringSize * 0.7,
                         child: CustomPaint(
-                          painter: _DoubleArrowPainter(
+                          painter: _CircularArrowPainter(
                             color: directionColor,
-                            strokeWidth: ringSize * 0.6 * 0.09,
+                            strokeWidth: ringSize * 0.7 * 0.1,
                           ),
                         ),
                       ),
@@ -754,27 +758,36 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
     // Eigener Avatar — dieselbe feste Umrandung + Puls wie bei Gegnern
     // (vorher nur ein schwaches, animationsabhängiges Glühen ohne festen
     // Ring — dadurch stach der eigene Zug visuell schwächer heraus als der
-    // der Gegner). Alle Größen mit vScale skaliert (siehe Kommentar oben
-    // bei dessen Definition) — auf einem realen Telefon mit wenig
-    // logischer Höhe reichte der unskalierte 84×104-Bereich bis in den
-    // Ring hinein.
+    // der Gegner). Sitzt bewusst NEBEN der Hand (unten links), nicht mehr
+    // MITTIG DARÜBER: die Handkarten fächern sich leicht auf (siehe
+    // PersistentPlayerHandWidget._buildFan), die mittlere Karte reicht
+    // dabei bis an die Oberkante der Hand-Zone — genau dort saß vorher der
+    // eigene Avatar zentriert und überlappte deshalb mit ihr. Seitlich
+    // davon reicht selbst bei maximal vielen Handkarten keine Karte hin
+    // (Fächer-Öffnungswinkel ist auf 45° begrenzt, siehe dort).
     final ownBoxW = ownAvatarBoxSize;
     final ownBoxH = ownAvatarBoxSize + ownAvatarBadgeAllowance;
+    final ownBottomOffset = edgeM + (cardW * 1.5 - ownBoxH) / 2;
     avatarPositions[myId] = Offset(
-      size.width / 2,
-      size.height - (edgeM + cardW * 1.5 + ownBottomGap) - ownBoxW / 2,
+      edgeM + ownBoxW / 2,
+      size.height - ownBottomOffset - ownBoxH / 2,
     );
     layers.add(
       Positioned(
-        bottom: edgeM + cardW * 1.5 + ownBottomGap,
-        left: size.width / 2 - ownBoxW / 2,
+        bottom: ownBottomOffset,
+        left: edgeM,
         child: isTurn
-            ? SizedBox(
-                width: ownBoxW,
-                height: ownBoxH,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
+            // Kein umschließender SizedBox(width: ownBoxW) mehr um die
+            // ganze Column: das zwang auch das "Du bist dran"-Badge auf
+            // die schmale Avatar-Kreis-Breite, wodurch der Text auf zwei
+            // Zeilen umbrach und über den unten fest zugewiesenen Platz
+            // hinausragte (RenderFlex-Overflow). Ohne Breitenzwang darf
+            // das Badge so breit werden, wie sein Text braucht — genau
+            // wie beim Gegner-Pendant ("Am Zug"), das nie in eine feste
+            // Box gezwungen wurde.
+            ? Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
                     SizedBox(
                       width: ownBoxW,
                       height: ownBoxW,
@@ -830,8 +843,7 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
                         style: TextStyle(color: Colors.black, fontSize: 9, fontWeight: FontWeight.bold),
                       ),
                     ),
-                  ],
-                ),
+                ],
               )
             : CircleAvatar(
                 radius: 16 * vScale,
@@ -957,14 +969,18 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
 }
 
 /// Zeichnet zwei kurze, dünne Pfeilbögen (Kreislauf-Symbol) für die
-/// Richtungsanzeige. Ersetzt Icons.autorenew, dessen Pfeilspitzen fest
-/// vorgegeben und vergleichsweise dick sind — hier lässt sich die Dicke von
-/// Strich und Spitze frei über [strokeWidth] steuern.
-class _DoubleArrowPainter extends CustomPainter {
+/// Richtungsanzeige: EIN durchgehender Bogen (fast ein voller Kreis) mit
+/// EINER klaren Pfeilspitze am Ende — wie ein "Neu laden"/Rotations-Icon.
+/// Die vorherige Version zeichnete zwei kurze 120°-Bögen mit 60°-Lücken:
+/// bei typischer Ringgröße war der sichtbare "Schaft" vor jeder Spitze so
+/// kurz, dass das Ganze eher wie zwei Klammern "( )" aussah als wie
+/// Pfeile. Ein einzelner langer Bogen liest sich eindeutig als Pfeil, weil
+/// Schaft und Spitze klar auseinanderzuhalten sind.
+class _CircularArrowPainter extends CustomPainter {
   final Color color;
   final double strokeWidth;
 
-  _DoubleArrowPainter({required this.color, required this.strokeWidth});
+  _CircularArrowPainter({required this.color, required this.strokeWidth});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -974,56 +990,46 @@ class _DoubleArrowPainter extends CustomPainter {
       ..color = color
       ..style = PaintingStyle.stroke
       ..strokeWidth = strokeWidth
-      // butt statt round: ein rundes Stroke-Ende sitzt genau dort, wo auch
-      // die Pfeilspitze anfängt, und verschmilzt optisch mit ihr zu einem
-      // unklaren Klecks statt einer klar erkennbaren Spitze.
-      ..strokeCap = StrokeCap.butt;
+      // Rund statt butt: das Startende (kein Pfeil dort) soll wie ein
+      // sauber auslaufender Schaft wirken, nicht wie ein hartes Ende.
+      ..strokeCap = StrokeCap.round;
     final headPaint = Paint()
       ..color = color
       ..style = PaintingStyle.fill;
 
-    // Deutlich größer als vorher (3.0x/2.2x) — bei typischer Ringgröße war
-    // die Spitze kaum von der Bogenlinie zu unterscheiden und wirkte nicht
-    // wie ein "echter" Pfeil.
-    final headLen = strokeWidth * 4.2;
-    final headWidth = strokeWidth * 3.4;
+    const startAngle = -pi / 2;
+    // ~290° Bogen: fast ein voller Kreis, aber mit sichtbarer Lücke, damit
+    // klar erkennbar bleibt, dass es sich um einen Pfeil und keinen
+    // geschlossenen Ring handelt.
+    const sweepAngle = 2 * pi * 0.8;
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius),
+      startAngle,
+      sweepAngle,
+      false,
+      arcPaint,
+    );
 
-    void drawArrow(double startAngle, double sweepAngle) {
-      canvas.drawArc(
-        Rect.fromCircle(center: center, radius: radius),
-        startAngle,
-        sweepAngle,
-        false,
-        arcPaint,
-      );
+    final endAngle = startAngle + sweepAngle;
+    final tip = center + Offset(cos(endAngle), sin(endAngle)) * radius;
+    final travel = endAngle + pi / 2;
+    final dir = Offset(cos(travel), sin(travel));
+    final normal = Offset(-dir.dy, dir.dx);
+    final headLen = strokeWidth * 3.6;
+    final headWidth = strokeWidth * 3.0;
+    final base = tip - dir * headLen;
+    final p1 = base + normal * (headWidth / 2);
+    final p2 = base - normal * (headWidth / 2);
 
-      final endAngle = startAngle + sweepAngle;
-      final tip = center + Offset(cos(endAngle), sin(endAngle)) * radius;
-      final travel = endAngle + (sweepAngle > 0 ? pi / 2 : -pi / 2);
-      final dir = Offset(cos(travel), sin(travel));
-      final normal = Offset(-dir.dy, dir.dx);
-      final base = tip - dir * headLen;
-      final p1 = base + normal * (headWidth / 2);
-      final p2 = base - normal * (headWidth / 2);
-
-      final path = Path()
-        ..moveTo(tip.dx, tip.dy)
-        ..lineTo(p1.dx, p1.dy)
-        ..lineTo(p2.dx, p2.dy)
-        ..close();
-      canvas.drawPath(path, headPaint);
-    }
-
-    // Deutlich kürzere Bögen mit klaren Lücken dazwischen (vorher 158°
-    // Sweep mit nur 22° Lücke — das ergab bei üblicher Ringgröße praktisch
-    // einen fast geschlossenen Ring mit zwei kleinen Beulen statt zweier
-    // erkennbarer Pfeile). 120° Bogen + 60° Lücke lässt den "Schaft" klar
-    // als gebogene Linie erkennbar bleiben, an deren Ende die Spitze sitzt.
-    drawArrow(-pi / 3, 2 * pi / 3);
-    drawArrow(2 * pi / 3, 2 * pi / 3);
+    final path = Path()
+      ..moveTo(tip.dx, tip.dy)
+      ..lineTo(p1.dx, p1.dy)
+      ..lineTo(p2.dx, p2.dy)
+      ..close();
+    canvas.drawPath(path, headPaint);
   }
 
   @override
-  bool shouldRepaint(covariant _DoubleArrowPainter oldDelegate) =>
+  bool shouldRepaint(covariant _CircularArrowPainter oldDelegate) =>
       oldDelegate.color != color || oldDelegate.strokeWidth != strokeWidth;
 }
