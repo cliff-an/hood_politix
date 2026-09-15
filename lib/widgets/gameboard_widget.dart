@@ -967,8 +967,13 @@ class _DoubleArrowPainter extends CustomPainter {
       canvas.drawPath(path, headPaint);
     }
 
-    drawArrow(-pi * 0.12, pi * 0.88);
-    drawArrow(pi * 0.88, pi * 0.88);
+    // Deutlich kürzere Bögen mit klaren Lücken dazwischen (vorher 158°
+    // Sweep mit nur 22° Lücke — das ergab bei üblicher Ringgröße praktisch
+    // einen fast geschlossenen Ring mit zwei kleinen Beulen statt zweier
+    // erkennbarer Pfeile). 120° Bogen + 60° Lücke lässt den "Schaft" klar
+    // als gebogene Linie erkennbar bleiben, an deren Ende die Spitze sitzt.
+    drawArrow(-pi / 3, 2 * pi / 3);
+    drawArrow(2 * pi / 3, 2 * pi / 3);
   }
 
   @override

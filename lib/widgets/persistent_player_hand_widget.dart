@@ -284,15 +284,23 @@ class _PersistentPlayerHandWidgetState extends State<PersistentPlayerHandWidget>
           data: card,
           feedback: _cardImage(card, scale: 1.2),
           childWhenDragging: Opacity(opacity: .3, child: _cardImage(card)),
-          onDragCompleted: () {
-            setState(() => handCards.removeWhere((c) => c.id == card.id));
-          },
+          // Kein optimistisches Entfernen aus handCards mehr hier: ob die
+          // Karte wirklich gespielt werden durfte, entscheidet der Server
+          // (legaler Zug, legaler Jump-in) — bei einem illegalen Jump-in
+          // (falsche Karte, nicht am Zug) bleibt sie in Firebase in der
+          // Hand, oder bei einer Aktionskarte/leerem Ablagestapel wird
+          // FirebaseService.jumpInCard gar nicht erst aufgerufen. Ein
+          // Entfernen HIER, unabhängig vom Ergebnis, ließ die Karte dann
+          // dauerhaft aus der lokalen Anzeige verschwinden, obwohl sie
+          // laut Firebase noch in der Hand war. _handSub oben ist die
+          // einzige Quelle der Wahrheit und aktualisiert handCards nach
+          // jedem echten Schreibzugriff (inkl. der beiden Straf-Karten
+          // bei einem ungültigen Jump-in) ohnehin selbst.
           child: GestureDetector(
             key: cardKey,
             onTap: () async {
               if (!widget.isMyTurn) return;
               _flyCardToDiscard(card, cardKey);
-              setState(() => handCards.removeWhere((c) => c.id == card.id));
               // ignore: use_build_context_synchronously
               await GameController.instance.playCard(context, widget.playerId, card);
             },
