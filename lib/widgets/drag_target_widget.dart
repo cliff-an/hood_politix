@@ -65,12 +65,20 @@ class DragTargetWidget extends StatelessWidget {
           return Container(
             width: cardWidth,
             height: cardWidth * 1.5,
+            // Randbreite/Eckenrundung nur im Hover-Zustand — vorher war
+            // hier immer ein 2px-Rand + abgerundete Ecken aktiv, wodurch
+            // das sichtbare Kartenbild um den Rand nach innen schrumpfte
+            // (Border.all() inset das Kind) und der Ablagestapel dadurch
+            // kleiner und anders geschnitten wirkte als Deck/Handkarten
+            // (die beide randlos und rechteckig sind, exakt cardWidth
+            // groß). In Ruhe also randlos + rechteckig wie die anderen,
+            // die grüne Markierung erscheint nur beim Drag-Over.
             decoration: BoxDecoration(
               border: Border.all(
-                color: hovering ? Colors.greenAccent : Colors.black,
-                width: hovering ? 3 : 2,
+                color: hovering ? Colors.greenAccent : Colors.transparent,
+                width: hovering ? 3 : 0,
               ),
-              borderRadius: BorderRadius.circular(15),
+              borderRadius: BorderRadius.circular(hovering ? 15 : 0),
               boxShadow: hovering
                   ? [
                       BoxShadow(
@@ -82,7 +90,7 @@ class DragTargetWidget extends StatelessWidget {
                   : null,
             ),
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(13),
+              borderRadius: BorderRadius.circular(hovering ? 13 : 0),
               child: AnimatedSwitcher(
                 duration: const Duration(milliseconds: 320),
                 // Karte "poppt" beim Erscheinen rein statt sich einfach
