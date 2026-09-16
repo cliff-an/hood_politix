@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'dart:ui' as ui;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
@@ -457,13 +458,7 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
                         width: ringSize * 0.7,
                         height: ringSize * 0.7,
                         child: CustomPaint(
-                          painter: _DoubleArrowPainter(
-                            color: directionColor,
-                            // Deutlich dicker als vorher (0.09) — die
-                            // UNO-Vorlage zeigt kräftige, fette Bögen statt
-                            // dünner Linien.
-                            strokeWidth: ringSize * 0.7 * 0.17,
-                          ),
+                          painter: _DoubleArrowPainter(color: directionColor),
                         ),
                       ),
                     );
@@ -971,75 +966,88 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
   }
 }
 
-/// Zeichnet zwei gegenüberliegende Pfeilbögen im Stil des klassischen
-/// UNO-Richtungswechsel-Symbols: kräftige, dicke Bögen (fast Halbkreise)
-/// mit großen, breiten Pfeilspitzen — bewusst "fett"/plakativ statt dünn
-/// und technisch, wie vom Nutzer als Referenzbild vorgegeben.
+/// Zeichnet zwei gegenüberliegende Pfeile im Stil des klassischen UNO-
+/// Richtungswechsel-Symbols, nach dem vom Nutzer geschickten Referenzbild:
+/// jeder Pfeil ist eine durchgehend GEFÜLLTE, dicke gebogene Fläche (kein
+/// dünner Strich mit angeklebtem Dreieck) — am einen Ende gerade
+/// abgeschnitten, am anderen Ende zu einer breiten Spitze ausgezogen, die
+/// direkt aus der Bandbreite herauswächst. Zusätzlich ein warmer
+/// Verlauf (hell innen, kräftiger außen) und ein weicher Glüh-Schein,
+/// wie im Referenzbild.
 class _DoubleArrowPainter extends CustomPainter {
   final Color color;
-  final double strokeWidth;
 
-  _DoubleArrowPainter({required this.color, required this.strokeWidth});
+  _DoubleArrowPainter({required this.color});
+
+  Path _buildArrow(
+    Offset center,
+    double outerR,
+    double innerR,
+    double startAngle,
+    double shaftSweep,
+    double headAngle,
+  ) {
+    final shaftEndAngle = startAngle + shaftSweep;
+    final tipAngle = shaftEndAngle + headAngle;
+    final bandThickness = outerR - innerR;
+    // Die Spitze flärt deutlich über die Bandbreite hinaus (nicht nur ein
+    // kleiner Knick auf halber Breite) — erst nach außen UND innen
+    // ausladen, dann spitz zulaufen, sonst verschwindet die Spitze fast
+    // unsichtbar im Band (wie im vorherigen, zu dezenten Versuch).
+    final outerFlareR = outerR + bandThickness * 0.35;
+    final innerFlareR = innerR - bandThickness * 0.35;
+    final tipR = (outerR + innerR) / 2;
+
+    Offset at(double angle, double r) => center + Offset(cos(angle), sin(angle)) * r;
+
+    final path = Path()
+      ..addArc(Rect.fromCircle(center: center, radius: outerR), startAngle, shaftSweep)
+      ..lineTo(at(shaftEndAngle, outerFlareR).dx, at(shaftEndAngle, outerFlareR).dy)
+      ..lineTo(at(tipAngle, tipR).dx, at(tipAngle, tipR).dy)
+      ..lineTo(at(shaftEndAngle, innerFlareR).dx, at(shaftEndAngle, innerFlareR).dy)
+      ..lineTo(at(shaftEndAngle, innerR).dx, at(shaftEndAngle, innerR).dy)
+      ..arcTo(Rect.fromCircle(center: center, radius: innerR), shaftEndAngle, -shaftSweep, false)
+      ..close();
+    return path;
+  }
 
   @override
   void paint(Canvas canvas, Size size) {
     final center = size.center(Offset.zero);
-    final radius = size.shortestSide / 2 - strokeWidth;
-    final arcPaint = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = strokeWidth
-      // butt statt round: strokeCap gilt für BEIDE Enden des Bogens, nicht
-      // nur das Startende — ein rundes Ende an der Pfeilspitze-Seite fügt
-      // dort einen kleinen runden "Klecks" direkt an der Spitze hinzu
-      // (sichtbar als Ausbuchtung außerhalb des Dreiecks), statt dass die
-      // Spitze sauber spitz zuläuft.
-      ..strokeCap = StrokeCap.butt;
-    final headPaint = Paint()
-      ..color = color
-      ..style = PaintingStyle.fill;
+    final outerR = size.shortestSide / 2;
+    // Dickes Band statt dünner Linie — Banddicke ~42% des Außenradius,
+    // wie im Referenzbild (kleines, fast ausgefülltes Loch in der Mitte).
+    final innerR = outerR * 0.58;
 
-    // Breit und kurz statt schlank: die UNO-Vorlage hat plakative, fast
-    // dreieckige Spitzen, keine dünnen technischen Pfeile.
-    final headLen = strokeWidth * 2.4;
-    final headWidth = strokeWidth * 3.8;
+    // Winkel-Budget explizit aufgeteilt, damit sich Spitze und Lücke nie
+    // überlappen können: gap (reiner Zwischenraum) + headAngle (wie weit
+    // die Spitze über den Schaft hinausragt) + shaftSweep (der gebogene
+    // Teil) — zusammen zweimal 360°/2.
+    const gap = 20 * pi / 180;
+    const headAngle = 25 * pi / 180;
+    const shaftSweep = pi - gap - headAngle;
+    final arrow1 = _buildArrow(center, outerR, innerR, -shaftSweep / 2, shaftSweep, headAngle);
+    final arrow2 =
+        _buildArrow(center, outerR, innerR, pi - shaftSweep / 2, shaftSweep, headAngle);
 
-    void drawArrow(double startAngle, double sweepAngle) {
-      canvas.drawArc(
-        Rect.fromCircle(center: center, radius: radius),
-        startAngle,
-        sweepAngle,
-        false,
-        arcPaint,
-      );
+    final gradient = ui.Gradient.radial(
+      center,
+      outerR,
+      [Colors.amber.shade200, color, color.withValues(alpha: 0.9)],
+      const [0.0, 0.6, 1.0],
+    );
+    final fillPaint = Paint()..shader = gradient;
+    final glowPaint = Paint()
+      ..color = color.withValues(alpha: 0.55)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
 
-      final endAngle = startAngle + sweepAngle;
-      final tip = center + Offset(cos(endAngle), sin(endAngle)) * radius;
-      final travel = endAngle + pi / 2;
-      final dir = Offset(cos(travel), sin(travel));
-      final normal = Offset(-dir.dy, dir.dx);
-      final base = tip - dir * headLen;
-      final p1 = base + normal * (headWidth / 2);
-      final p2 = base - normal * (headWidth / 2);
-
-      final path = Path()
-        ..moveTo(tip.dx, tip.dy)
-        ..lineTo(p1.dx, p1.dy)
-        ..lineTo(p2.dx, p2.dy)
-        ..close();
-      canvas.drawPath(path, headPaint);
+    for (final arrow in [arrow1, arrow2]) {
+      canvas.drawPath(arrow, glowPaint);
+      canvas.drawPath(arrow, fillPaint);
     }
-
-    // Zwei ~165°-Bögen (fast Halbkreise) mit kleinen 15°-Lücken,
-    // punktsymmetrisch zueinander — beide schwenken in dieselbe Richtung,
-    // wie beim UNO-Symbol fast geschlossen statt mit großen Lücken.
-    const gap = pi / 12;
-    const sweep = pi - gap;
-    drawArrow(-sweep / 2, sweep);
-    drawArrow(pi - sweep / 2, sweep);
   }
 
   @override
   bool shouldRepaint(covariant _DoubleArrowPainter oldDelegate) =>
-      oldDelegate.color != color || oldDelegate.strokeWidth != strokeWidth;
+      oldDelegate.color != color;
 }
