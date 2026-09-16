@@ -3,7 +3,7 @@ description: A multiplayer card game built with Flutter and Firebase.
 
 publish_to: 'none'
 
-version: 1.0.17+17
+version: 1.0.18+18
 
 environment:
   sdk: ">=3.2.0 <4.0.0"
