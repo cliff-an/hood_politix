@@ -459,7 +459,10 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
                         child: CustomPaint(
                           painter: _DoubleArrowPainter(
                             color: directionColor,
-                            strokeWidth: ringSize * 0.7 * 0.09,
+                            // Deutlich dicker als vorher (0.09) — die
+                            // UNO-Vorlage zeigt kräftige, fette Bögen statt
+                            // dünner Linien.
+                            strokeWidth: ringSize * 0.7 * 0.17,
                           ),
                         ),
                       ),
@@ -968,11 +971,10 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
   }
 }
 
-/// Zeichnet zwei gegenüberliegende Pfeilbögen (Sync-/Recycling-Symbol) für
-/// die Richtungsanzeige — zwei 150°-Bögen mit 30°-Lücken dazwischen, beide
-/// in dieselbe Drehrichtung, je mit einer schlanken Pfeilspitze am Ende.
-/// Schlankere Spitze als in früheren Versuchen (headWidth < headLen statt
-/// umgekehrt), damit sie als spitzer Pfeil statt als breiter Keil liest.
+/// Zeichnet zwei gegenüberliegende Pfeilbögen im Stil des klassischen
+/// UNO-Richtungswechsel-Symbols: kräftige, dicke Bögen (fast Halbkreise)
+/// mit großen, breiten Pfeilspitzen — bewusst "fett"/plakativ statt dünn
+/// und technisch, wie vom Nutzer als Referenzbild vorgegeben.
 class _DoubleArrowPainter extends CustomPainter {
   final Color color;
   final double strokeWidth;
@@ -997,8 +999,10 @@ class _DoubleArrowPainter extends CustomPainter {
       ..color = color
       ..style = PaintingStyle.fill;
 
-    final headLen = strokeWidth * 3.4;
-    final headWidth = strokeWidth * 2.4;
+    // Breit und kurz statt schlank: die UNO-Vorlage hat plakative, fast
+    // dreieckige Spitzen, keine dünnen technischen Pfeile.
+    final headLen = strokeWidth * 2.4;
+    final headWidth = strokeWidth * 3.8;
 
     void drawArrow(double startAngle, double sweepAngle) {
       canvas.drawArc(
@@ -1026,10 +1030,10 @@ class _DoubleArrowPainter extends CustomPainter {
       canvas.drawPath(path, headPaint);
     }
 
-    // Zwei 150°-Bögen mit 30°-Lücken, punktsymmetrisch zueinander — beide
-    // schwenken in dieselbe Richtung (Sync-Symbol), statt sich als zwei
-    // unabhängige Klammern zu lesen.
-    const gap = pi / 6;
+    // Zwei ~165°-Bögen (fast Halbkreise) mit kleinen 15°-Lücken,
+    // punktsymmetrisch zueinander — beide schwenken in dieselbe Richtung,
+    // wie beim UNO-Symbol fast geschlossen statt mit großen Lücken.
+    const gap = pi / 12;
     const sweep = pi - gap;
     drawArrow(-sweep / 2, sweep);
     drawArrow(pi - sweep / 2, sweep);
