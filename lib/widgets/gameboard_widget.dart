@@ -990,9 +990,12 @@ class _CircularArrowPainter extends CustomPainter {
       ..color = color
       ..style = PaintingStyle.stroke
       ..strokeWidth = strokeWidth
-      // Rund statt butt: das Startende (kein Pfeil dort) soll wie ein
-      // sauber auslaufender Schaft wirken, nicht wie ein hartes Ende.
-      ..strokeCap = StrokeCap.round;
+      // butt statt round: strokeCap gilt für BEIDE Enden des Bogens, nicht
+      // nur das Startende — ein rundes Ende an der Pfeilspitze-Seite fügt
+      // dort einen kleinen runden "Klecks" direkt an der Spitze hinzu
+      // (sichtbar als Ausbuchtung außerhalb des Dreiecks), statt dass die
+      // Spitze sauber spitz zuläuft.
+      ..strokeCap = StrokeCap.butt;
     final headPaint = Paint()
       ..color = color
       ..style = PaintingStyle.fill;
