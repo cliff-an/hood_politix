@@ -457,9 +457,9 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
                         width: ringSize * 0.7,
                         height: ringSize * 0.7,
                         child: CustomPaint(
-                          painter: _CircularArrowPainter(
+                          painter: _DoubleArrowPainter(
                             color: directionColor,
-                            strokeWidth: ringSize * 0.7 * 0.1,
+                            strokeWidth: ringSize * 0.7 * 0.09,
                           ),
                         ),
                       ),
@@ -968,19 +968,16 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
   }
 }
 
-/// Zeichnet zwei kurze, dünne Pfeilbögen (Kreislauf-Symbol) für die
-/// Richtungsanzeige: EIN durchgehender Bogen (fast ein voller Kreis) mit
-/// EINER klaren Pfeilspitze am Ende — wie ein "Neu laden"/Rotations-Icon.
-/// Die vorherige Version zeichnete zwei kurze 120°-Bögen mit 60°-Lücken:
-/// bei typischer Ringgröße war der sichtbare "Schaft" vor jeder Spitze so
-/// kurz, dass das Ganze eher wie zwei Klammern "( )" aussah als wie
-/// Pfeile. Ein einzelner langer Bogen liest sich eindeutig als Pfeil, weil
-/// Schaft und Spitze klar auseinanderzuhalten sind.
-class _CircularArrowPainter extends CustomPainter {
+/// Zeichnet zwei gegenüberliegende Pfeilbögen (Sync-/Recycling-Symbol) für
+/// die Richtungsanzeige — zwei 150°-Bögen mit 30°-Lücken dazwischen, beide
+/// in dieselbe Drehrichtung, je mit einer schlanken Pfeilspitze am Ende.
+/// Schlankere Spitze als in früheren Versuchen (headWidth < headLen statt
+/// umgekehrt), damit sie als spitzer Pfeil statt als breiter Keil liest.
+class _DoubleArrowPainter extends CustomPainter {
   final Color color;
   final double strokeWidth;
 
-  _CircularArrowPainter({required this.color, required this.strokeWidth});
+  _DoubleArrowPainter({required this.color, required this.strokeWidth});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1000,39 +997,45 @@ class _CircularArrowPainter extends CustomPainter {
       ..color = color
       ..style = PaintingStyle.fill;
 
-    const startAngle = -pi / 2;
-    // ~290° Bogen: fast ein voller Kreis, aber mit sichtbarer Lücke, damit
-    // klar erkennbar bleibt, dass es sich um einen Pfeil und keinen
-    // geschlossenen Ring handelt.
-    const sweepAngle = 2 * pi * 0.8;
-    canvas.drawArc(
-      Rect.fromCircle(center: center, radius: radius),
-      startAngle,
-      sweepAngle,
-      false,
-      arcPaint,
-    );
+    final headLen = strokeWidth * 3.4;
+    final headWidth = strokeWidth * 2.4;
 
-    final endAngle = startAngle + sweepAngle;
-    final tip = center + Offset(cos(endAngle), sin(endAngle)) * radius;
-    final travel = endAngle + pi / 2;
-    final dir = Offset(cos(travel), sin(travel));
-    final normal = Offset(-dir.dy, dir.dx);
-    final headLen = strokeWidth * 3.6;
-    final headWidth = strokeWidth * 3.0;
-    final base = tip - dir * headLen;
-    final p1 = base + normal * (headWidth / 2);
-    final p2 = base - normal * (headWidth / 2);
+    void drawArrow(double startAngle, double sweepAngle) {
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: radius),
+        startAngle,
+        sweepAngle,
+        false,
+        arcPaint,
+      );
 
-    final path = Path()
-      ..moveTo(tip.dx, tip.dy)
-      ..lineTo(p1.dx, p1.dy)
-      ..lineTo(p2.dx, p2.dy)
-      ..close();
-    canvas.drawPath(path, headPaint);
+      final endAngle = startAngle + sweepAngle;
+      final tip = center + Offset(cos(endAngle), sin(endAngle)) * radius;
+      final travel = endAngle + pi / 2;
+      final dir = Offset(cos(travel), sin(travel));
+      final normal = Offset(-dir.dy, dir.dx);
+      final base = tip - dir * headLen;
+      final p1 = base + normal * (headWidth / 2);
+      final p2 = base - normal * (headWidth / 2);
+
+      final path = Path()
+        ..moveTo(tip.dx, tip.dy)
+        ..lineTo(p1.dx, p1.dy)
+        ..lineTo(p2.dx, p2.dy)
+        ..close();
+      canvas.drawPath(path, headPaint);
+    }
+
+    // Zwei 150°-Bögen mit 30°-Lücken, punktsymmetrisch zueinander — beide
+    // schwenken in dieselbe Richtung (Sync-Symbol), statt sich als zwei
+    // unabhängige Klammern zu lesen.
+    const gap = pi / 6;
+    const sweep = pi - gap;
+    drawArrow(-sweep / 2, sweep);
+    drawArrow(pi - sweep / 2, sweep);
   }
 
   @override
-  bool shouldRepaint(covariant _CircularArrowPainter oldDelegate) =>
+  bool shouldRepaint(covariant _DoubleArrowPainter oldDelegate) =>
       oldDelegate.color != color || oldDelegate.strokeWidth != strokeWidth;
 }
