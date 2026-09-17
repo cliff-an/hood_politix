@@ -112,6 +112,8 @@ class GameController extends ChangeNotifier {
   StreamSubscription<DatabaseEvent>? _snitchRevealSubscription;
   StreamSubscription<DatabaseEvent>? _playerOrderSubscription;
   StreamSubscription<DatabaseEvent>? _reactionSubscription;
+  StreamSubscription<DatabaseEvent>? _firstTurnFlagSubscription;
+  StreamSubscription<DatabaseEvent>? _snitchActionSubscription;
 
   BotGameDriver? _botDriver;
 
@@ -155,6 +157,12 @@ class GameController extends ChangeNotifier {
     // A) currentPlayerId -> Timer-Handling
     _currentPlayerSubscription =
         _gameRef.child("gameState/currentPlayerId").onValue.listen((event) {
+      // cancel() in dispose() verhindert nur KÜNFTIGE Events — ein Event,
+      // das genau in dem Moment schon zur Auslieferung eingeplant war,
+      // kann trotzdem noch einmal feuern und würde sonst notifyListeners()
+      // auf einem bereits entsorgten ChangeNotifier aufrufen (roter
+      // Fehler-Screen). Gilt für jeden Listener unten gleichermaßen.
+      if (_disposed) return;
       final newId = event.snapshot.value?.toString();
       if (newId == null) return;
 
@@ -197,6 +205,7 @@ class GameController extends ChangeNotifier {
     // B) gameState-Objekt -> Richtung, Reihenfolge, Ablagestapel
     _gameUpdatesSubscription =
         _gameRef.child("gameState").onValue.listen((event) {
+      if (_disposed) return;
       final raw = event.snapshot.value;
       if (raw == null || raw is! Map) return;
 
@@ -252,10 +261,13 @@ class GameController extends ChangeNotifier {
   }
 
   void _listenForSnitchAction() {
-  FirebaseDatabase.instance
+  // War wie _listenForFirstTurnFlag bisher nirgends gespeichert/gecancelt.
+  _snitchActionSubscription?.cancel();
+  _snitchActionSubscription = FirebaseDatabase.instance
     .ref('games/$gameId/snitchAction')
     .onValue
     .listen((event) async {
+      if (_disposed) return;
       final raw = event.snapshot.value;
       if (raw == null || raw is! Map) return;
 
@@ -297,6 +309,7 @@ class GameController extends ChangeNotifier {
         .child('gameState/playerOrder')
         .onValue
         .listen((event) {
+      if (_disposed) return;
       final raw = event.snapshot.value;
       final order = raw is List ? List<String>.from(raw) : <String>[];
       playerOrder = order;
@@ -310,6 +323,7 @@ class GameController extends ChangeNotifier {
     _deckSubscription?.cancel();
     _deckSubscription =
         _gameRef.child("gameState/deck").onValue.listen((event) {
+      if (_disposed) return;
       final raw = event.snapshot.value as List<dynamic>? ?? [];
       deck = raw.map((e) => int.parse(e.toString())).toList();
       notifyListeners();
@@ -319,6 +333,7 @@ class GameController extends ChangeNotifier {
   void _listenForPlayersUpdates() {
     _playersSubscription?.cancel();
     _playersSubscription = _gameRef.child("players").onValue.listen((event) {
+      if (_disposed) return;
       final raw = event.snapshot.value;
       if (raw == null || raw is! Map) {
         players = [];
@@ -340,6 +355,7 @@ class GameController extends ChangeNotifier {
     _snitchRevealSubscription?.cancel();
     _snitchRevealSubscription =
         _gameRef.child('snitchReveal').onChildAdded.listen((event) async {
+      if (_disposed) return;
       final raw = event.snapshot.value;
       if (raw == null || raw is! Map) return;
 
@@ -372,7 +388,13 @@ class GameController extends ChangeNotifier {
   }
 
   void _listenForFirstTurnFlag() {
-    _gameRef.child("gameState/hasFirstTurnStarted").onValue.listen((event) {
+    // War bisher nirgends gespeichert/gecancelt — lief nach dispose()
+    // unbegrenzt weiter und rief irgendwann garantiert notifyListeners()
+    // auf einem bereits entsorgten ChangeNotifier auf (roter Fehler-Screen).
+    _firstTurnFlagSubscription?.cancel();
+    _firstTurnFlagSubscription =
+        _gameRef.child("gameState/hasFirstTurnStarted").onValue.listen((event) {
+      if (_disposed) return;
       hasFirstTurnStarted = event.snapshot.value == true;
       notifyListeners();
     });
@@ -383,6 +405,7 @@ class GameController extends ChangeNotifier {
     _reactionSubscription?.cancel();
     _reactionSubscription =
         _gameRef.child('reactions').onValue.listen((event) async {
+      if (_disposed) return;
       final data = event.snapshot.value;
 
       // Hinweis: die öffentliche Kartenanzeige in der Tischmitte (siehe
@@ -741,6 +764,8 @@ class GameController extends ChangeNotifier {
     _snitchRevealSubscription?.cancel();
     _playerOrderSubscription?.cancel();
     _reactionSubscription?.cancel();
+    _firstTurnFlagSubscription?.cancel();
+    _snitchActionSubscription?.cancel();
     _botDriver?.dispose();
 
     _cancelTurnTimerInternal();

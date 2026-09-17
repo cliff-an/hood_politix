@@ -56,6 +56,23 @@ class FirebaseService {
   })  : _auth = mockAuth,
         _database = mockDatabase;
 
+  /// Einmaliger erneuter Versuch für einen reinen Lesezugriff, der mit
+  /// PERMISSION_DENIED scheitert — siehe Kommentar bei der Nutzung in
+  /// startGame(). Nur für .get()-Aufrufe gedacht (nebenwirkungsfrei,
+  /// daher gefahrlos wiederholbar), nicht für Schreibzugriffe.
+  Future<DataSnapshot> _getWithRetry(
+    DatabaseReference ref, {
+    Duration delay = const Duration(milliseconds: 400),
+  }) async {
+    try {
+      return await ref.get();
+    } on FirebaseException catch (e) {
+      if (e.code != 'permission-denied') rethrow;
+      await Future.delayed(delay);
+      return await ref.get();
+    }
+  }
+
   // ---------- Realtime Listener ----------
 
   Stream<DatabaseEvent> listenForGameUpdates(String gameId) {
@@ -302,7 +319,17 @@ Future<List<String>> _loadValidPlayerOrder(String gameId) async {
     final gameRef = _database.ref('games/$gameId');
     final playersRef = gameRef.child("players");
 
-    final playersSnapshot = await playersRef.get();
+    // Direkt nach schnellem Spiel-Wechsel (verlassen -> sofort neues Spiel
+    // erstellen) kam es beobachtbar vor, dass genau dieser erste Lesezugriff
+    // auf ein Spiel, das der Client gerade selbst angelegt hat, einmalig mit
+    // PERMISSION_DENIED scheiterte — obwohl die Regeln (state ==
+    // "waiting for players") das eigentlich erlauben. Die Websocket-
+    // Verbindung des RTDB-SDKs braucht nach vielen Verbindungswechseln in
+    // kurzer Zeit offenbar einen Moment, um Auth-Kontext neu zu
+    // synchronisieren; ein einzelner erneuter Versuch nach kurzer Pause
+    // behebt das zuverlässig, da es ein rein lesender, nebenwirkungsfreier
+    // Aufruf ist.
+    final playersSnapshot = await _getWithRetry(playersRef);
     if (!playersSnapshot.exists || playersSnapshot.value == null) {
       throw Exception("Keine Spieler zum Starten des Spiels gefunden.");
     }

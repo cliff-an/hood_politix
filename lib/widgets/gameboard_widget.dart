@@ -10,6 +10,7 @@ import '../models/firebase_service.dart';
 import '../models/game_card.dart';
 import '../models/game_controller.dart';
 import '../models/game_meta.dart';
+import '../models/player.dart';
 import '../screens/lobby_screen.dart';
 import 'drag_target_widget.dart';
 import 'persistent_player_hand_widget.dart';
@@ -271,30 +272,62 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              // Aktueller Spieler + Timer zentriert
+              // Aktueller Spieler + Timer zentriert — beim eigenen Zug
+              // deutlich auffälliger (pulsierend + größer + Glüh-Schatten)
+              // statt derselben ruhigen Box wie bei einem Gegner-Zug, damit
+              // der eigene Zug nicht übersehen wird.
               if (currentPlayer != null)
                 Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 10),
-                      decoration: BoxDecoration(
-                        color: currentPlayer.id == myId
-                            ? Colors.green.withValues(alpha: 0.85)
-                            : Colors.black54,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        currentPlayer.id == myId
-                            ? 'Du bist am Zug'
-                            : '${currentPlayer.name} ist am Zug',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 13,
-                          fontWeight: FontWeight.bold,
+                    if (currentPlayer.id == myId)
+                      AnimatedBuilder(
+                        animation: _pulseCtrl,
+                        builder: (_, __) {
+                          final t = _pulseCtrl.value;
+                          return Transform.scale(
+                            scale: 1.0 + 0.08 * t,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 16),
+                              decoration: BoxDecoration(
+                                color: Colors.green.withValues(alpha: 0.9),
+                                borderRadius: BorderRadius.circular(10),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.greenAccent.withValues(alpha: 0.35 + 0.35 * t),
+                                    blurRadius: 10 + 10 * t,
+                                    spreadRadius: 1 + 2 * t,
+                                  ),
+                                ],
+                              ),
+                              child: const Text(
+                                'Du bist am Zug',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      )
+                    else
+                      Container(
+                        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 10),
+                        decoration: BoxDecoration(
+                          color: Colors.black54,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          '${currentPlayer.name} ist am Zug',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
-                    ),
                     if (ctrl.remainingTime > 0)
                       Container(
                         margin: const EdgeInsets.only(top: 4),
@@ -542,7 +575,24 @@ class _GameBoardState extends State<GameBoard> with TickerProviderStateMixin {
     // wo der eigene Avatar samt Zug-Ring sitzt (siehe tableCenter unten) —,
     // weil dieser mittlere Gegner stattdessen am höchsten Punkt des Bogens
     // sitzt und so am weitesten vom eigenen Avatar entfernt ist.
-    final opponents = ctrl.players.where((p) => p.id != myId).toList();
+    // Sitzordnung an den Namen ausrichten: "Bot West" saß bisher einfach an
+    // der Position, die seine (praktisch zufällige) Reihenfolge in
+    // ctrl.players ergab — das konnte "Ost" links und "West" rechts zeigen.
+    // Der Bogen läuft von links (theta=pi) nach rechts (theta=0), Westen
+    // liegt also links, Osten rechts, wenn man wie üblich mit Norden oben
+    // und dem eigenen Platz unten (Süden) auf den Tisch schaut.
+    int compassRank(Player p) {
+      final n = p.name;
+      if (n.contains('West')) return 0;
+      if (n.contains('Nord')) return 1;
+      if (n.contains('Mitte')) return 2;
+      if (n.contains('Süd')) return 3;
+      if (n.contains('Ost')) return 4;
+      return 2; // echte Mitspieler ohne Richtungsnamen: neutral in die Mitte
+    }
+
+    final opponents = ctrl.players.where((p) => p.id != myId).toList()
+      ..sort((a, b) => compassRank(a).compareTo(compassRank(b)));
     // headerBottom/minY/baseY/arcLift werden schon oben bei der
     // Ring-Größenberechnung gebraucht (siehe dort) und deshalb nicht hier
     // neu deklariert.
