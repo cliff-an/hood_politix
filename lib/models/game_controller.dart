@@ -452,15 +452,25 @@ class GameController extends ChangeNotifier {
   }
 
   // -------- Turn-Timer (20 Sekunden) --------
+  // Die remainingTime-Schreibzugriffe hier sind bewusst "fire and forget"
+  // (nicht awaited) — reiner Best-Effort-Sync des sichtbaren Countdowns für
+  // andere Spieler, kein kritischer Spielzustand. Genau deshalb aber auch
+  // .catchError() nötig: cancel() stoppt nur KÜNFTIGE Ticks, ein bereits
+  // losgeschickter (unawaited!) Schreibzugriff des letzten Ticks — oder
+  // sogar der disposal-eigene Schreibzugriff unten — kann noch unterwegs
+  // sein, wenn kurz danach leaveGame() den Spieler aus players/ entfernt.
+  // Ohne catchError wird das dann als nicht abgefangener PERMISSION_DENIED-
+  // Fehler sichtbar, obwohl der Countdown für ein verlassenes Spiel
+  // niemanden mehr interessiert.
   void _startTurnTimerInternal() {
     _cancelTurnTimerInternal();
     remainingTime = 20;
-    _gameRef.child('gameState/remainingTime').set(remainingTime);
+    _gameRef.child('gameState/remainingTime').set(remainingTime).catchError((_) {});
     notifyListeners();
 
     _turnTimer = Timer.periodic(const Duration(seconds: 1), (t) async {
       remainingTime--;
-      _gameRef.child('gameState/remainingTime').set(remainingTime);
+      _gameRef.child('gameState/remainingTime').set(remainingTime).catchError((_) {});
       notifyListeners();
 
       if (remainingTime <= 0) {
@@ -479,7 +489,7 @@ class GameController extends ChangeNotifier {
     _turnTimer?.cancel();
     _turnTimer = null;
     remainingTime = 0;
-    _gameRef.child('gameState/remainingTime').set(remainingTime);
+    _gameRef.child('gameState/remainingTime').set(remainingTime).catchError((_) {});
   }
 
   // -------- UI-Helper --------

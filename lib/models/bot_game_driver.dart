@@ -104,14 +104,26 @@ class BotGameDriver {
       // Nach der Bedenkzeit erneut prüfen — Zustand kann sich geändert haben.
       if (controller.currentPlayerId != botId || !_isLeader()) return;
       if (!await _claimTurn(turn)) return; // ein anderer Client übernimmt
+      // Jeder await oben ist ein Punkt, an dem der Mensch währenddessen das
+      // Spiel verlassen und dispose() ausgelöst haben kann — players/{uid}
+      // existiert dann nicht mehr, jeder WEITERE Schreibzugriff dieses
+      // Clients scheitert garantiert mit PERMISSION_DENIED (siehe
+      // leaveGame()-Kommentar in firebase_service.dart). Ein einziger
+      // _disposed-Check direkt nach der Bedenkzeit reichte nicht, weil
+      // danach noch mehrere weitere Schreibzugriffe folgen — deshalb hier
+      // und nach jedem weiteren await erneut prüfen, statt erst ganz am
+      // Ende zu scheitern.
+      if (_disposed) return;
 
       if (!controller.hasFirstTurnStarted) {
         await FirebaseDatabase.instance
             .ref('games/$gameId/gameState/hasFirstTurnStarted')
             .set(true);
       }
+      if (_disposed) return;
 
       final hand = await firebaseService.getPlayerCards(gameId, botId);
+      if (_disposed) return;
       final chosen =
           BotEngine.chooseCardToPlay(hand, controller.topCardOfDiscardPile);
 
@@ -120,6 +132,7 @@ class BotGameDriver {
         // Zug NICHT selbst (siehe animated_deck.dart), also hier wie dort
         // unbedingt advanceToNextPlayer hinterher aufrufen.
         await controller.drawCard(botId);
+        if (_disposed) return;
         await firebaseService.advanceToNextPlayer(gameId);
         return;
       }
@@ -132,6 +145,7 @@ class BotGameDriver {
       } else if (mic == BotMicAction.drop) {
         await firebaseService.markMicDrop(gameId, botId);
       }
+      if (_disposed) return;
 
       final ctx = navigatorKey.currentState?.overlay?.context;
       if (ctx == null) return;
@@ -232,6 +246,7 @@ class BotGameDriver {
       if ((fresh['reactionId']?.toString()) != rid) return;
       if (!_isLeader()) return;
       if (!await _claimReaction(rid)) return;
+      if (_disposed) return;
 
       await _handleBotReaction(fresh, target!);
     } finally {
@@ -264,6 +279,7 @@ class BotGameDriver {
 
     if (reactable.isEmpty) {
       await firebaseService.handleUnansweredReaction(gameId);
+      if (_disposed) return;
       await gameRef.child('reactions/handled').set(true);
       return;
     }
@@ -287,7 +303,9 @@ class BotGameDriver {
 
       if (initial is ActionCard && initial.actionType == ActionType.deal) {
         await firebaseService.performDealActionNoReaction(gameId, source, target);
+        if (_disposed) return;
         await firebaseService.nextTurn(gameId);
+        if (_disposed) return;
         await gameRef.child('reactions/handled').set(true);
         return;
       }
@@ -298,6 +316,7 @@ class BotGameDriver {
           target,
           initial,
         );
+        if (_disposed) return;
         // Turn-Advance übernimmt der Source-Client (Mensch oder Bot) in
         // _executeSnitchChoice/performSnitchAction — hier NICHT aufrufen.
         await gameRef.child('reactions/handled').set(true);
@@ -306,6 +325,7 @@ class BotGameDriver {
     }
 
     await firebaseService.handleUnansweredReaction(gameId);
+    if (_disposed) return;
     await gameRef.child('reactions/handled').set(true);
   }
 
@@ -351,6 +371,7 @@ class BotGameDriver {
       // Ersetzt eine separate Claim + anschließendes .remove().
       final consumed = await _claimSnitchAction(sourceId!, targetId);
       if (!consumed) return;
+      if (_disposed) return;
 
       final snitchCard = GameCard.fromMap(
         Map<String, dynamic>.from(snitchMap),
@@ -386,22 +407,28 @@ class BotGameDriver {
   ) async {
     if (BotEngine.chooseSnitchSwap(_rng)) {
       final mine = await firebaseService.getPlayerCards(gameId, source);
-      if (mine.isEmpty) return;
+      if (mine.isEmpty || _disposed) return;
       final theirs = await firebaseService.getPlayerCards(gameId, target);
-      if (theirs.isEmpty) return;
+      if (theirs.isEmpty || _disposed) return;
       final myCard = mine[_rng.nextInt(mine.length)];
       final theirCard = theirs[_rng.nextInt(theirs.length)];
       await firebaseService.swapHandCard(gameId, source, target, myCard, theirCard);
+      if (_disposed) return;
       await firebaseService.updateGameStatus(gameId);
+      if (_disposed) return;
       await Future.delayed(const Duration(milliseconds: 300));
+      if (_disposed) return;
       await firebaseService.advanceToNextPlayer(gameId);
     } else {
       final theirs = await firebaseService.getPlayerCards(gameId, target);
-      if (theirs.isEmpty) return;
+      if (theirs.isEmpty || _disposed) return;
       final card = theirs[_rng.nextInt(theirs.length)];
       await firebaseService.revealSnitchCard(gameId, target, card.id, source);
+      if (_disposed) return;
       await firebaseService.updateGameStatus(gameId);
+      if (_disposed) return;
       await Future.delayed(const Duration(milliseconds: 300));
+      if (_disposed) return;
       await firebaseService.advanceToNextPlayer(gameId);
     }
   }
