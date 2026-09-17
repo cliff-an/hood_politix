@@ -62,6 +62,13 @@ class GameController extends ChangeNotifier {
   final FirebaseService firebaseService;
 
   bool _initialized = false;
+  // Eigene Markierung statt sich auf ChangeNotifier-Internas zu verlassen:
+  // mehrere Stellen hier planen Arbeit über einen await/Future.delayed
+  // VORAUS (Zug-Timer-Start, s.u.) — wird dispose() währenddessen
+  // aufgerufen, darf die verzögerte Fortsetzung notifyListeners() nicht
+  // mehr aufrufen (ChangeNotifier wirft sonst "used after being disposed",
+  // sichtbar als roter Fehler-Screen).
+  bool _disposed = false;
 
   GameCard? _topCardOfDiscardPile;
   String? currentPlayerId;
@@ -168,9 +175,17 @@ class GameController extends ChangeNotifier {
         final myId = FirebaseAuth.instance.currentUser?.uid;
         if (newId == myId) {
           _gameRef.child('gameState/state').get().then((stateSnap) {
+            if (_disposed) return;
             if (stateSnap.value?.toString() != 'in progress') return;
             if (!hasFirstTurnStarted) {
-              Future.delayed(const Duration(seconds: 1), _startTurnTimerInternal);
+              // dispose() kann während dieser Sekunde Wartezeit aufgerufen
+              // werden (z. B. Spiel verlassen kurz nach Zugwechsel) — ohne
+              // den Check würde _startTurnTimerInternal() hier auf einem
+              // bereits entsorgten ChangeNotifier notifyListeners()
+              // aufrufen und mit "used after being disposed" abstürzen.
+              Future.delayed(const Duration(seconds: 1), () {
+                if (!_disposed) _startTurnTimerInternal();
+              });
             } else {
               _startTurnTimerInternal();
             }
@@ -637,25 +652,44 @@ class GameController extends ChangeNotifier {
     String targetPlayerId,
     GameCard snitchCard,
   ) async {
+      // 15-Sekunden-Zeitlimit für die GESAMTE Snitch-Aktion (Auswahl
+      // Tauschen/Zeigen UND anschließende Kartenwahl zusammen, nicht pro
+      // Dialog-Schritt einzeln) — reagiert der Spieler nicht rechtzeitig,
+      // wird der offene Dialog geschlossen und ohne Aktion zum nächsten
+      // Spieler weitergeschaltet. `resolved` sorgt dafür, dass eine
+      // verspätete Nutzerentscheidung (Dialog war gerade noch offen, als
+      // der Timer feuerte) hinterher nicht zusätzlich schreibt/weiterschaltet.
+      var resolved = false;
+      final timeoutTimer = Timer(const Duration(seconds: 15), () async {
+        if (resolved) return;
+        resolved = true;
+        DialogManager.closeDialog();
+        await FirebaseService.instance.advanceToNextPlayer(gameId);
+      });
+
       await DialogManager.showAppDialog<void>(
         SnitchOptionDialog(
           onChosen: (choice) async {
+          if (resolved) return;
           DialogManager.closeDialog();
 
           if (choice == SnitchChoice.swap) {
             final mine =
                 await firebaseService.getPlayerCards(gameId, currentPlayerId);
-                if (mine.isEmpty) return;
+                if (mine.isEmpty || resolved) return;
             final theirs =
                 await firebaseService.getPlayerCards(gameId, targetPlayerId);
-                if (theirs.isEmpty) return;
+                if (theirs.isEmpty || resolved) return;
 
             await DialogManager.showAppDialog<void>(
               DualCardSelectDialog(
                 currentPlayerCards: mine,
                 targetPlayerCards: theirs,
                 onCardsSelected: (mineCard, theirCard) async {
+                  if (resolved) return;
                   if (mineCard != null && theirCard != null) {
+                    resolved = true;
+                    timeoutTimer.cancel();
                     await firebaseService.swapHandCard(
                       gameId, currentPlayerId, targetPlayerId, mineCard, theirCard,
                     );
@@ -670,11 +704,14 @@ class GameController extends ChangeNotifier {
           } else {
             final theirs =
                 await firebaseService.getPlayerCards(gameId, targetPlayerId);
-                if (theirs.isEmpty) return;
+                if (theirs.isEmpty || resolved) return;
             await DialogManager.showAppDialog<void>(
               RevealCardDialog(
                 targetCards: theirs,
                 onCardRevealed: (card) async {
+                  if (resolved) return;
+                  resolved = true;
+                  timeoutTimer.cancel();
                   await firebaseService.revealSnitchCard(
                       gameId, targetPlayerId, card.id, currentPlayerId);
                   DialogManager.closeDialog();
@@ -690,11 +727,13 @@ class GameController extends ChangeNotifier {
       ),
       gameId: gameId,
     );
+    timeoutTimer.cancel();
   }
 
   // -------- Dispose --------
   @override
   void dispose() {
+    _disposed = true;
     _currentPlayerSubscription?.cancel();
     _gameUpdatesSubscription?.cancel();
     _playersSubscription?.cancel();

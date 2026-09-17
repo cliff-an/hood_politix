@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
@@ -30,6 +32,16 @@ class ReactionDialog extends StatefulWidget {
 class _ReactionDialogState extends State<ReactionDialog> with SingleTickerProviderStateMixin {
   late final AnimationController _glowCtrl;
 
+  // 10-Sekunden-Reaktionsfenster: reagiert der Spieler nicht rechtzeitig,
+  // läuft das Spiel automatisch ohne Reaktion weiter (wie ein expliziter
+  // Tap auf "Keine Reaktion"). _resolved verhindert Doppelausführung, falls
+  // der Timer genau in dem Moment abläuft, in dem der Spieler noch selbst
+  // tippt.
+  static const _timeoutSeconds = 10;
+  int _remainingSeconds = _timeoutSeconds;
+  Timer? _countdownTimer;
+  bool _resolved = false;
+
   @override
   void initState() {
     super.initState();
@@ -37,10 +49,28 @@ class _ReactionDialogState extends State<ReactionDialog> with SingleTickerProvid
       vsync: this,
       duration: const Duration(milliseconds: 900),
     )..repeat(reverse: true);
+
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) return;
+      setState(() => _remainingSeconds--);
+      if (_remainingSeconds <= 0) {
+        t.cancel();
+        _resolve(widget.onNoReaction);
+      }
+    });
+  }
+
+  Future<void> _resolve(Future<void> Function() action) async {
+    if (_resolved) return;
+    _resolved = true;
+    _countdownTimer?.cancel();
+    await action();
+    if (mounted) DialogManager.closeDialog();
   }
 
   @override
   void dispose() {
+    _countdownTimer?.cancel();
     _glowCtrl.dispose();
     super.dispose();
   }
@@ -53,7 +83,23 @@ class _ReactionDialogState extends State<ReactionDialog> with SingleTickerProvid
     final previousCard = widget.previousCard;
 
     return AlertDialog(
-      title: const Text('Reaktion wählen'),
+      title: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          const Text('Reaktion wählen'),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: Colors.red.withValues(alpha: 0.7),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              '${_remainingSeconds}s',
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -117,10 +163,7 @@ class _ReactionDialogState extends State<ReactionDialog> with SingleTickerProvid
                     width: 50,
                   ),
                   title: Text(card.toString()),
-                  onTap: () async {
-                    await widget.onCardSelected(card);
-                    DialogManager.closeDialog();
-                  },
+                  onTap: () => _resolve(() => widget.onCardSelected(card)),
                 ),
               )
             else
@@ -180,10 +223,7 @@ class _ReactionDialogState extends State<ReactionDialog> with SingleTickerProvid
       actions: <Widget>[
         TextButton(
           child: const Text('Keine Reaktion'),
-          onPressed: () async {
-            await widget.onNoReaction();
-            DialogManager.closeDialog();
-          },
+          onPressed: () => _resolve(widget.onNoReaction),
         ),
       ],
     );

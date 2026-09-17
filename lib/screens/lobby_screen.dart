@@ -312,6 +312,20 @@ class _LobbyScreenState extends State<LobbyScreen> {
                         return const Center(child: CircularProgressIndicator());
                       }
                       if (snap.hasError) {
+                        // Der Logout-Button ruft FirebaseAuth.signOut() aus
+                        // OHNE dass dieser Stream vorher beendet wird (ein
+                        // StreamBuilder lässt sich nicht "von außen"
+                        // canceln) — der bereits laufende Listener auf
+                        // games/ bekommt dadurch kurzzeitig noch einen
+                        // permission-denied-Push, BEVOR AuthGate reagiert
+                        // und diesen Screen überhaupt abbaut. Kein echter
+                        // Fehler für den Nutzer, nur ein Wettlauf beim
+                        // Verlassen — also nichts anzeigen statt der
+                        // rohen Fehlermeldung, AuthGate navigiert gleich
+                        // sowieso zum Login-Screen.
+                        if (FirebaseAuth.instance.currentUser == null) {
+                          return const Center(child: CircularProgressIndicator());
+                        }
                         return Center(child: Text('Fehler: ${snap.error}'));
                       }
 
